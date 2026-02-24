@@ -1,4 +1,6 @@
-# LaReataDigital
+# LaReataDigital2
+
+Repositorio base del sistema La Reata Digital, con historial reiniciado y configuración lista para desarrollo.
 
 Sistema web para venta y validación de tickets de charreada con Laravel + MySQL + Vue.
 
