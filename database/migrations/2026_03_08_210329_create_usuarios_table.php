@@ -11,10 +11,10 @@ return new class extends Migration
         Schema::create('usuarios', function (Blueprint $table) {
             $table->id();
             $table->string('nombre');
-            $table->string('correo')->unique();
+            $table->string('usuario')->unique();
             $table->string('password');
             $table->string('telefono')->nullable();
-            $table->enum('rol',['admin','vendedor','checador','promotor','superadmin']);
+            $table->enum('rol',['administrador','vendedor','checador','promotor','superadministrador']);
             $table->timestamps();
         });
 Schema::create('password_reset_tokens', function (Blueprint $table) {

@@ -17,8 +17,7 @@ return new class extends Migration
             $table->decimal('precio',10,2);
 
             $table->string('codigo_barras')->unique();
-            // dejamos como pendiente por si optamos mejor por codigos qr o algo similar
-            //$table->string('codigo_qr')->unique();
+            $table->string('codigo_qr')->unique();
 
             $table->enum('estado',[
                 'disponible',
@@ -28,7 +27,6 @@ return new class extends Migration
                 'cancelado'
             ])->default('disponible');
             $table->boolean('escaneado')->default(false);
-            $table->timestamp('fecha_primer_acceso')->nullable();
 
             $table->foreignId('id_promotor')->nullable()->constrained('promotores')->nullOnDelete();
 

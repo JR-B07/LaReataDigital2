@@ -8,25 +8,42 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::create('ventas', function (Blueprint $table) {
-            $table->id();
+       Schema::create('ventas', function (Blueprint $table) {
 
-            $table->foreignId('id_usuario')->constrained('usuarios');
+    $table->id();
 
-            $table->decimal('total',10,2);
+    $table->foreignId('id_usuario')
+        ->nullable()
+        ->constrained('usuarios')
+        ->nullOnDelete();
 
-            $table->enum('metodo_pago',[
-                'efectivo',
-                'transferencia',
-                'tarjeta'
-            ]);
+    $table->decimal('total',10,2);
 
-            $table->string('nombre_cliente')->nullable();
-            $table->string('telefono_cliente')->nullable();
-            $table->string('correo_cliente')->nullable();
+    $table->enum('metodo_pago',[
+        'efectivo',
+        'transferencia',
+        'tarjeta'
+    ]);
 
-            $table->timestamps();
-        });
+    $table->enum('canal_venta',[
+        'taquilla',
+        'online',
+        'promotor'
+    ])->default('taquilla');
+
+    $table->enum('estado_pago',[
+        'pendiente',
+        'pagado',
+        'cancelado'
+    ])->default('pendiente');
+
+    $table->string('nombre_cliente')->nullable();
+    $table->string('telefono_cliente')->nullable();
+    $table->string('correo_cliente')->nullable();
+    $table->string('referencia_pago')->nullable();
+
+    $table->timestamps();
+});
     }
 
     public function down(): void

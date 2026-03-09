@@ -14,7 +14,11 @@ return new class extends Migration
             $table->string('nombre');
             $table->date('fecha');
             $table->time('hora');
+
             $table->enum('estatus',['activo','cancelado','finalizado'])->default('activo');
+
+            $table->enum('tipo_codigo',['barra','qr'])->default('barra');
+
             $table->timestamps();
         });
     }
