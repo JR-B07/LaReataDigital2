@@ -1,19 +1,78 @@
 <script setup>
-import { ref, computed } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 
-const prices = [850, 500, 350, 150];
-const qtys = ref([2, 0, 0, 0]);
+const event = ref(null);
+const zones = ref([]);
+const loading = ref(true);
+const qtys = ref([]);
+const step = ref(2);
+const buyerName = ref('');
+const buyerEmail = ref('');
+const buyerPhone = ref('');
+const paymentMethod = ref('card');
+const promoCode = ref('');
+const promoMsg = ref('');
+const purchasing = ref(false);
+const orderResult = ref(null);
+const errorMsg = ref('');
 
-const subtotal = computed(() => qtys.value.reduce((sum, qty, index) => sum + qty * prices[index], 0));
+const eventId = new URLSearchParams(window.location.search).get('event');
+
+onMounted(async () => {
+    if (!eventId) { loading.value = false; return; }
+    try {
+        const { data } = await window.axios.get(`/api/events/${eventId}`);
+        event.value = data;
+        zones.value = data.zones || [];
+        qtys.value = zones.value.map(() => 0);
+    } catch (e) {
+        console.error(e);
+    } finally {
+        loading.value = false;
+    }
+});
+
+const subtotal = computed(() => qtys.value.reduce((sum, qty, i) => sum + qty * parseFloat(zones.value[i]?.price || 0), 0));
 const fee = computed(() => Math.round(subtotal.value * 0.1));
 const total = computed(() => subtotal.value + fee.value);
+const hasItems = computed(() => qtys.value.some(q => q > 0));
+const currency = (v) => `$${Number(v).toLocaleString('es-MX')}`;
+const changeQty = (i, delta) => { qtys.value[i] = Math.max(0, Math.min(20, qtys.value[i] + delta)); };
 
-const changeQty = (index, delta) => {
-    const next = qtys.value[index] + delta;
-    qtys.value[index] = Math.max(0, next);
+const formatDate = (d) => {
+    if (!d) return '';
+    const dt = new Date(d);
+    return dt.toLocaleDateString('es-MX', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }).toUpperCase();
 };
 
-const currency = (value) => `$${value.toLocaleString('es-MX')}`;
+const goToStep3 = () => { if (hasItems.value) step.value = 3; };
+const goToStep4 = () => { if (buyerName.value && buyerEmail.value) step.value = 4; };
+
+const purchase = async () => {
+    purchasing.value = true;
+    errorMsg.value = '';
+    const selectedIdx = qtys.value.findIndex(q => q > 0);
+    if (selectedIdx === -1) return;
+
+    try {
+        const { data } = await window.axios.post('/api/checkout', {
+            event_id: event.value.id,
+            event_zone_id: zones.value[selectedIdx].id,
+            quantity: qtys.value[selectedIdx],
+            buyer_name: buyerName.value,
+            buyer_email: buyerEmail.value,
+            buyer_phone: buyerPhone.value || null,
+            payment_method: paymentMethod.value,
+            discount_code: promoCode.value || null,
+        });
+        orderResult.value = data;
+        step.value = 5;
+    } catch (e) {
+        errorMsg.value = e.response?.data?.message || 'Error al procesar la compra.';
+    } finally {
+        purchasing.value = false;
+    }
+};
 </script>
 
 <template>
@@ -21,177 +80,180 @@ const currency = (value) => `$${value.toLocaleString('es-MX')}`;
         <a href="/" class="topbar-brand">Chárro<span>Tickets</span></a>
         <div class="topbar-nav">
             <a href="/">Inicio</a>
-            <a href="/compra" class="active">Comprar</a>
-            <a href="/validador">Validador</a>
-            <a href="/admin">Admin</a>
-            <a href="/reportes">Reportes</a>
+            <a href="/vendedor">Iniciar sesion</a>
         </div>
     </nav>
-    <div class="page-label">Vista 2 / 5 — Compra de Boletos</div>
+    <div class="page-label">Compra de Boletos</div>
 
-    <div class="event-banner">
-        <div class="event-banner-icon">🐎</div>
-        <div>
-            <div class="event-banner-title">Gran Campeonato Nacional de Charreada 2025</div>
-            <div class="event-banner-meta">📅 SAB 15 MAR 2025 · 10:00 AM &nbsp;&nbsp; 📍 Lienzo Charro Guadalajara, Jalisco</div>
-        </div>
-        <a href="/" class="event-banner-back">← Cambiar evento</a>
+    <div v-if="loading" style="text-align:center;padding:60px;font-family:'DM Mono',monospace;color:var(--gris);">Cargando evento...</div>
+    <div v-else-if="!event" style="text-align:center;padding:60px;font-family:'DM Mono',monospace;color:var(--gris);">
+        No se seleccionó un evento. <a href="/" style="color:var(--dorado);">Volver al inicio</a>
     </div>
 
-    <div class="stepper">
-        <div class="step done"><span class="step-num">✓</span>Evento</div>
-        <div class="step current"><span class="step-num">2</span>Boletos</div>
-        <div class="step pending"><span class="step-num">3</span>Tus datos</div>
-        <div class="step pending"><span class="step-num">4</span>Pago</div>
-        <div class="step pending"><span class="step-num">5</span>Confirmación</div>
-    </div>
+    <template v-else>
+        <div class="event-banner">
+            <div class="event-banner-icon">🐎</div>
+            <div>
+                <div class="event-banner-title">{{ event.name }}</div>
+                <div class="event-banner-meta">📅 {{ formatDate(event.starts_at) }} &nbsp;&nbsp; 📍 {{ event.venue }}, {{ event.city }}</div>
+            </div>
+            <a href="/" class="event-banner-back">← Cambiar evento</a>
+        </div>
 
-    <div class="buy-layout">
-        <div class="buy-main">
-            <span class="mono-label">Mapa del Lienzo Charro</span>
-            <div class="zone-map">
-                <div class="zone-map-title">Selecciona tu zona — haz clic para filtrar</div>
-                <div class="lienzo-diagram">
-                    <div class="lienzo-row"><div class="lienzo-zone vip" style="width:340px;">Palco VIP · Fila A–C</div></div>
-                    <div class="lienzo-row"><div class="lienzo-zone premium" style="width:320px;">Gradería Premium · Fila D–H</div></div>
-                    <div class="lienzo-row"><div class="lienzo-arena">🐎 ARENA — LIENZO CHARRO 🐎</div></div>
-                    <div class="lienzo-row"><div class="lienzo-zone general" style="width:320px;">General · Zona Norte y Sur</div></div>
+        <div class="stepper">
+            <div :class="['step', step > 1 ? 'done' : 'current']"><span class="step-num">{{ step > 1 ? '✓' : '1' }}</span>Evento</div>
+            <div :class="['step', step > 2 ? 'done' : step === 2 ? 'current' : 'pending']"><span class="step-num">{{ step > 2 ? '✓' : '2' }}</span>Boletos</div>
+            <div :class="['step', step > 3 ? 'done' : step === 3 ? 'current' : 'pending']"><span class="step-num">{{ step > 3 ? '✓' : '3' }}</span>Tus datos</div>
+            <div :class="['step', step > 4 ? 'done' : step === 4 ? 'current' : 'pending']"><span class="step-num">{{ step > 4 ? '✓' : '4' }}</span>Pago</div>
+            <div :class="['step', step === 5 ? 'done' : 'pending']"><span class="step-num">{{ step === 5 ? '✓' : '5' }}</span>Confirmación</div>
+        </div>
+
+        <!-- STEP 5: Confirmación -->
+        <div v-if="step === 5" style="padding:60px 40px;text-align:center;">
+            <div style="font-size:72px;margin-bottom:16px;">✅</div>
+            <div class="section-title" style="margin-bottom:8px;">¡Compra Exitosa!</div>
+            <div style="font-family:'DM Mono',monospace;font-size:12px;color:var(--gris);margin-bottom:24px;">
+                Tu orden ha sido procesada. Se enviará la confirmación a <b style="color:var(--dorado-claro);">{{ buyerEmail }}</b>
+            </div>
+            <div v-if="orderResult" style="background:#1A0800;border:1px solid rgba(200,146,42,0.3);padding:20px;max-width:500px;margin:0 auto;text-align:left;">
+                <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--dorado);letter-spacing:2px;margin-bottom:12px;">DETALLE DE ORDEN</div>
+                <div style="font-size:13px;margin-bottom:6px;">Orden: <b style="color:var(--dorado-claro);">#{{ orderResult.order?.id }}</b></div>
+                <div style="font-size:13px;margin-bottom:6px;">Total: <b style="color:var(--dorado-claro);">{{ currency(orderResult.order?.total || 0) }}</b></div>
+                <div style="font-size:13px;margin-bottom:12px;">Tickets: <b style="color:var(--dorado-claro);">{{ orderResult.tickets?.length || 0 }}</b></div>
+                <div v-for="t in (orderResult.tickets || [])" :key="t.ticket_code" style="padding:8px 0;border-top:1px dashed rgba(200,146,42,0.15);font-family:'DM Mono',monospace;font-size:11px;color:var(--crema);">
+                    {{ t.ticket_code }}
+                    <a :href="`/api/tickets/${t.ticket_code}/pdf`" target="_blank" style="color:var(--dorado);margin-left:12px;">⬇ PDF</a>
                 </div>
             </div>
+            <a href="/" style="display:inline-block;margin-top:24px;padding:12px 24px;background:var(--rojo);color:var(--crema);font-family:'DM Mono',monospace;font-size:11px;letter-spacing:2px;text-decoration:none;">← VOLVER AL INICIO</a>
+        </div>
 
-            <div class="section-title" style="margin-bottom: 16px;">Selecciona tus Boletos</div>
-            <div class="seat-categories">
-                <div class="seat-cat selected">
-                    <div class="seat-cat-info">
-                        <div class="seat-dot" style="background: var(--dorado);"></div>
-                        <div>
-                            <div class="seat-name">Palco VIP</div>
-                            <div class="seat-desc">Asiento numerado · Vista preferencial · Incluye frigorífico</div>
-                            <div class="seat-avail">✓ 353 lugares disponibles</div>
+        <!-- STEP 2-4: Main layout -->
+        <div v-else class="buy-layout">
+            <div class="buy-main">
+                <!-- STEP 2: Boletos -->
+                <template v-if="step === 2">
+                    <span class="mono-label">Mapa del Lienzo Charro</span>
+                    <div class="zone-map">
+                        <div class="zone-map-title">Zonas disponibles para este evento</div>
+                        <div class="lienzo-diagram">
+                            <div v-for="zone in zones" :key="zone.id" class="lienzo-row">
+                                <div class="lienzo-zone vip" style="width:340px;">{{ zone.name }} · {{ zone.capacity - zone.sold_count }} disponibles</div>
+                            </div>
+                            <div class="lienzo-row"><div class="lienzo-arena">🐎 ARENA — LIENZO CHARRO 🐎</div></div>
                         </div>
                     </div>
-                    <div class="seat-right">
-                        <div class="seat-price">$850</div>
-                        <div class="qty-control">
-                            <button class="qty-btn" @click="changeQty(0, -1)">−</button>
-                            <div class="qty-num">{{ qtys[0] }}</div>
-                            <button class="qty-btn" @click="changeQty(0, 1)">+</button>
-                        </div>
-                    </div>
-                </div>
 
-                <div class="seat-cat">
-                    <div class="seat-cat-info">
-                        <div class="seat-dot" style="background: #FF6B6B;"></div>
-                        <div>
-                            <div class="seat-name">Gradería Premium</div>
-                            <div class="seat-desc">Asiento numerado · Buena vista lateral</div>
-                            <div class="seat-avail">✓ 412 lugares disponibles</div>
+                    <div class="section-title" style="margin-bottom: 16px;">Selecciona tus Boletos</div>
+                    <div class="seat-categories">
+                        <div v-for="(zone, i) in zones" :key="zone.id" :class="['seat-cat', qtys[i] > 0 ? 'selected' : '']">
+                            <div class="seat-cat-info">
+                                <div class="seat-dot" :style="{ background: ['var(--dorado)', '#FF6B6B', '#6BFFAA', 'var(--gris)'][i % 4] }"></div>
+                                <div>
+                                    <div class="seat-name">{{ zone.name }}</div>
+                                    <div class="seat-desc">Capacidad: {{ zone.capacity }}</div>
+                                    <div class="seat-avail">✓ {{ zone.capacity - zone.sold_count }} lugares disponibles</div>
+                                </div>
+                            </div>
+                            <div class="seat-right">
+                                <div class="seat-price">{{ currency(zone.price) }}</div>
+                                <div class="qty-control">
+                                    <button class="qty-btn" @click="changeQty(i, -1)">−</button>
+                                    <div class="qty-num">{{ qtys[i] }}</div>
+                                    <button class="qty-btn" @click="changeQty(i, 1)">+</button>
+                                </div>
+                            </div>
                         </div>
                     </div>
-                    <div class="seat-right">
-                        <div class="seat-price">$500</div>
-                        <div class="qty-control">
-                            <button class="qty-btn" @click="changeQty(1, -1)">−</button>
-                            <div class="qty-num">{{ qtys[1] }}</div>
-                            <button class="qty-btn" @click="changeQty(1, 1)">+</button>
-                        </div>
-                    </div>
-                </div>
 
-                <div class="seat-cat">
-                    <div class="seat-cat-info">
-                        <div class="seat-dot" style="background: #6BFFAA;"></div>
-                        <div>
-                            <div class="seat-name">General</div>
-                            <div class="seat-desc">Acceso libre · Zonas norte y sur</div>
-                            <div class="seat-avail">✓ 200 lugares disponibles</div>
+                    <div class="promo-section">
+                        <span class="mono-label">¿Tienes código de descuento?</span>
+                        <div class="promo-input">
+                            <input v-model="promoCode" type="text" placeholder="INGRESA TU CÓDIGO">
+                            <button>Aplicar</button>
                         </div>
                     </div>
-                    <div class="seat-right">
-                        <div class="seat-price">$350</div>
-                        <div class="qty-control">
-                            <button class="qty-btn" @click="changeQty(2, -1)">−</button>
-                            <div class="qty-num">{{ qtys[2] }}</div>
-                            <button class="qty-btn" @click="changeQty(2, 1)">+</button>
-                        </div>
-                    </div>
-                </div>
+                </template>
 
-                <div class="seat-cat">
-                    <div class="seat-cat-info">
-                        <div class="seat-dot" style="background: var(--gris);"></div>
+                <!-- STEP 3: Datos del comprador -->
+                <template v-if="step === 3">
+                    <div class="section-title" style="margin-bottom:20px;">Tus Datos</div>
+                    <div style="max-width:500px;display:flex;flex-direction:column;gap:16px;">
                         <div>
-                            <div class="seat-name">Niños (3–12 años)</div>
-                            <div class="seat-desc">Precio especial · Requiere acompañante adulto</div>
-                            <div class="seat-avail">✓ Sin límite disponible</div>
+                            <span class="mono-label">Nombre completo</span>
+                            <input v-model="buyerName" type="text" placeholder="Tu nombre" style="width:100%;background:rgba(0,0,0,0.4);border:1px solid rgba(200,146,42,0.3);padding:12px 16px;color:var(--crema);font-family:'DM Mono',monospace;font-size:12px;outline:none;">
+                        </div>
+                        <div>
+                            <span class="mono-label">Correo electrónico</span>
+                            <input v-model="buyerEmail" type="email" placeholder="tu@correo.com" style="width:100%;background:rgba(0,0,0,0.4);border:1px solid rgba(200,146,42,0.3);padding:12px 16px;color:var(--crema);font-family:'DM Mono',monospace;font-size:12px;outline:none;">
+                        </div>
+                        <div>
+                            <span class="mono-label">Teléfono (opcional)</span>
+                            <input v-model="buyerPhone" type="tel" placeholder="55 1234 5678" style="width:100%;background:rgba(0,0,0,0.4);border:1px solid rgba(200,146,42,0.3);padding:12px 16px;color:var(--crema);font-family:'DM Mono',monospace;font-size:12px;outline:none;">
+                        </div>
+                        <div style="display:flex;gap:10px;margin-top:8px;">
+                            <button @click="step = 2" class="btn-outline" style="padding:12px 20px;">← Regresar</button>
+                            <button @click="goToStep4" class="btn-continuar" style="flex:1;" :disabled="!buyerName || !buyerEmail">Continuar → Pago</button>
                         </div>
                     </div>
-                    <div class="seat-right">
-                        <div class="seat-price">$150</div>
-                        <div class="qty-control">
-                            <button class="qty-btn" @click="changeQty(3, -1)">−</button>
-                            <div class="qty-num">{{ qtys[3] }}</div>
-                            <button class="qty-btn" @click="changeQty(3, 1)">+</button>
+                </template>
+
+                <!-- STEP 4: Pago -->
+                <template v-if="step === 4">
+                    <div class="section-title" style="margin-bottom:20px;">Método de Pago</div>
+                    <div style="max-width:500px;display:flex;flex-direction:column;gap:12px;">
+                        <label v-for="m in [{v:'card', l:'💳 Tarjeta de crédito/débito'}, {v:'oxxo', l:'🏪 OXXO (efectivo)'}, {v:'transfer', l:'🏦 Transferencia bancaria'}]" :key="m.v"
+                            :style="{display:'flex',alignItems:'center',gap:'12px',padding:'14px 16px',border:'1px solid ' + (paymentMethod === m.v ? 'var(--dorado-claro)' : 'rgba(200,146,42,0.2)'),background: paymentMethod === m.v ? 'rgba(240,192,96,0.08)' : 'rgba(0,0,0,0.2)',cursor:'pointer'}">
+                            <input type="radio" :value="m.v" v-model="paymentMethod" style="accent-color:var(--dorado);">
+                            <span style="font-family:'DM Mono',monospace;font-size:12px;color:var(--crema);">{{ m.l }}</span>
+                        </label>
+                        <div v-if="errorMsg" style="padding:10px;border:1px solid #F44336;background:rgba(244,67,54,0.1);color:#F44336;font-family:'DM Mono',monospace;font-size:11px;">{{ errorMsg }}</div>
+                        <div style="display:flex;gap:10px;margin-top:12px;">
+                            <button @click="step = 3" class="btn-outline" style="padding:12px 20px;">← Regresar</button>
+                            <button @click="purchase" class="btn-continuar" style="flex:1;" :disabled="purchasing">{{ purchasing ? 'Procesando...' : 'Confirmar Compra →' }}</button>
                         </div>
                     </div>
-                </div>
+                </template>
             </div>
 
-            <div class="promo-section">
-                <span class="mono-label">¿Tienes código de descuento?</span>
-                <div class="promo-input">
-                    <input type="text" placeholder="INGRESA TU CÓDIGO">
-                    <button>Aplicar</button>
+            <div class="buy-sidebar">
+                <div class="order-title">Resumen de Orden</div>
+                <div class="order-event">
+                    <div class="order-event-name">{{ event.name }}</div>
+                    <div class="order-event-meta">📅 {{ formatDate(event.starts_at) }}<br>📍 {{ event.venue }}, {{ event.city }}</div>
+                </div>
+                <div class="order-divider"></div>
+                <div class="order-items">
+                    <template v-for="(zone, i) in zones" :key="zone.id">
+                        <div v-if="qtys[i] > 0" class="order-item">
+                            <div>
+                                <div class="order-item-name">{{ zone.name }}</div>
+                                <div class="order-item-qty">{{ qtys[i] }} boletos × {{ currency(zone.price) }}</div>
+                            </div>
+                            <div class="order-item-price">{{ currency(qtys[i] * parseFloat(zone.price)) }}</div>
+                        </div>
+                    </template>
+                </div>
+                <div class="order-divider"></div>
+                <div class="order-subtotals">
+                    <div class="order-line"><span>Subtotal</span><span>{{ currency(subtotal) }}</span></div>
+                    <div class="order-line"><span>Cargo por servicio (10%)</span><span>{{ currency(fee) }}</span></div>
+                </div>
+                <div class="order-total">
+                    <div class="order-total-label">Total</div>
+                    <div class="order-total-price">{{ currency(total) }}</div>
+                </div>
+                <button v-if="step === 2" @click="goToStep3" class="btn-continuar" :disabled="!hasItems">Continuar → Mis Datos</button>
+                <div class="secure-badge">🔒 PAGO 100% SEGURO · SSL CIFRADO<br>Los tickets se envían a tu correo electrónico</div>
+                <div class="payment-icons">
+                    <div class="pay-icon">💳 Visa</div>
+                    <div class="pay-icon">💳 MC</div>
+                    <div class="pay-icon">🏪 OXXO</div>
+                    <div class="pay-icon">📱 MercadoPago</div>
                 </div>
             </div>
         </div>
-
-        <div class="buy-sidebar">
-            <div class="order-title">Resumen de Orden</div>
-
-            <div class="order-event">
-                <div class="order-event-name">Gran Campeonato Nacional de Charreada</div>
-                <div class="order-event-meta">📅 SAB 15 MAR 2025 · 10:00 AM<br>📍 Lienzo Charro, Guadalajara</div>
-            </div>
-
-            <div class="order-divider"></div>
-
-            <div class="order-items">
-                <div class="order-item">
-                    <div>
-                        <div class="order-item-name">Palco VIP</div>
-                        <div class="order-item-qty">{{ qtys[0] }} boletos × $850</div>
-                    </div>
-                    <div class="order-item-price">{{ currency(qtys[0] * 850) }}</div>
-                </div>
-            </div>
-
-            <div class="order-divider"></div>
-
-            <div class="order-subtotals">
-                <div class="order-line"><span>Subtotal</span><span>{{ currency(subtotal) }}</span></div>
-                <div class="order-line"><span>Cargo por servicio (10%)</span><span>{{ currency(fee) }}</span></div>
-                <div class="order-line"><span>Descuento</span><span style="color: #4CAF50;">—</span></div>
-            </div>
-
-            <div class="order-total">
-                <div class="order-total-label">Total</div>
-                <div class="order-total-price">{{ currency(total) }}</div>
-            </div>
-
-            <button class="btn-continuar">Continuar → Mis Datos</button>
-
-            <div class="secure-badge">🔒 PAGO 100% SEGURO · SSL CIFRADO<br>Los tickets se envían a tu correo electrónico</div>
-
-            <div class="payment-icons">
-                <div class="pay-icon">💳 Visa</div>
-                <div class="pay-icon">💳 MC</div>
-                <div class="pay-icon">🏪 OXXO</div>
-                <div class="pay-icon">📱 MercadoPago</div>
-            </div>
-        </div>
-    </div>
+    </template>
 </template>
 
 <style>

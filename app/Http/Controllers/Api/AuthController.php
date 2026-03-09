@@ -18,7 +18,7 @@ class AuthController extends Controller
             'email' => ['required', 'email', 'max:255', 'unique:users,email'],
             'phone' => ['nullable', 'string', 'max:30'],
             'password' => ['required', 'string', 'min:8'],
-            'role' => ['nullable', 'in:buyer,validator,admin'],
+            'role' => ['nullable', 'in:buyer,seller,validator,admin'],
         ]);
 
         $user = User::query()->create([
@@ -38,15 +38,29 @@ class AuthController extends Controller
     public function login(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'email' => ['required', 'email'],
+            'login' => ['nullable', 'string'],
+            'email' => ['nullable', 'string'],
             'password' => ['required', 'string'],
         ]);
 
-        $user = User::query()->where('email', $data['email'])->first();
+        $login = trim((string) ($data['login'] ?? $data['email'] ?? ''));
+
+        if ($login === '') {
+            throw ValidationException::withMessages([
+                'login' => ['Debes indicar tu usuario o correo.'],
+            ]);
+        }
+
+        $normalizedLogin = strtolower(str_replace(' ', '', $login));
+
+        $user = User::query()
+            ->whereRaw('LOWER(email) = ?', [strtolower($login)])
+            ->orWhereRaw("REPLACE(LOWER(name), ' ', '') = ?", [$normalizedLogin])
+            ->first();
 
         if (! $user || ! Hash::check($data['password'], $user->password)) {
             throw ValidationException::withMessages([
-                'email' => ['Credenciales inválidas.'],
+                'login' => ['Credenciales inválidas.'],
             ]);
         }
 

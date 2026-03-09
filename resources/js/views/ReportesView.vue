@@ -1,254 +1,295 @@
 <script setup>
-import { computed } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 
-const weeklyData = [
-    { label: 'Sem 1', vip: 40, prem: 30, gen: 20 },
-    { label: 'Sem 2', vip: 65, prem: 45, gen: 35 },
-    { label: 'Sem 3', vip: 30, prem: 25, gen: 15 },
-    { label: 'Sem 4', vip: 90, prem: 70, gen: 50 },
-    { label: 'Sem 5', vip: 75, prem: 55, gen: 40 },
-    { label: 'Sem 6', vip: 110, prem: 80, gen: 55 },
-    { label: 'Sem 7', vip: 85, prem: 65, gen: 45 },
-    { label: 'Sem 8', vip: 130, prem: 90, gen: 60 },
-];
+const token = ref(localStorage.getItem('auth_token') || '');
+const user = ref(null);
+const loginName = ref('');
+const loginPass = ref('');
+const loginError = ref('');
+const loggingIn = ref(false);
 
-const bars = computed(() => {
-    const max = Math.max(...weeklyData.map((item) => item.vip + item.prem + item.gen));
+const summary = ref({ orders_count: 0, tickets_sold: 0, revenue_total: 0, attendance_rate: 0, fraud_attempts: 0 });
+const events = ref([]);
+const selectedEventId = ref(null);
+const zoneData = ref([]);
+const loading = ref(true);
 
-    return weeklyData.map((item) => {
-        const total = item.vip + item.prem + item.gen;
-        return {
-            ...item,
-            total,
-            stackHeight: `${(total / max) * 128}px`,
-            vipHeight: `${(item.vip / total) * 100}%`,
-            premHeight: `${(item.prem / total) * 100}%`,
-            genHeight: `${(item.gen / total) * 100}%`,
-        };
+const ax = () => {
+    const i = window.axios.create();
+    if (token.value) i.defaults.headers.common['Authorization'] = `Bearer ${token.value}`;
+    return i;
+};
+
+const doLogin = async () => {
+    loggingIn.value = true; loginError.value = '';
+    try {
+        const { data } = await window.axios.post('/api/auth/login', { login: loginName.value, password: loginPass.value });
+        token.value = data.token;
+        user.value = data.user;
+        localStorage.setItem('auth_token', data.token);
+
+        if (data.user?.role === 'validator') {
+            window.location.href = '/validador';
+            return;
+        }
+
+        window.location.href = '/vendedor';
+    } catch (e) { loginError.value = e.response?.data?.message || 'Credenciales inválidas.'; }
+    finally { loggingIn.value = false; }
+};
+
+const doLogout = async () => {
+    try {
+        if (token.value) await ax().post('/api/auth/logout');
+    } catch {
+        // Ignore logout API errors and continue local cleanup.
+    }
+
+    token.value = '';
+    user.value = null;
+    localStorage.removeItem('auth_token');
+    window.location.href = '/';
+};
+
+const loadData = async () => {
+    loading.value = true;
+    try {
+        const [sumRes, evRes] = await Promise.all([ax().get('/api/seller/reports/summary'), ax().get('/api/seller/events')]);
+        summary.value = sumRes.data;
+        events.value = evRes.data.data || evRes.data;
+        if (events.value.length > 0 && !selectedEventId.value) {
+            selectedEventId.value = events.value[0].id;
+            await loadZones();
+        }
+    } catch { /* noop */ }
+    finally { loading.value = false; }
+};
+
+const loadZones = async () => {
+    if (!selectedEventId.value) return;
+    try { const { data } = await ax().get('/api/seller/reports/sales-by-zone', { params: { event_id: selectedEventId.value } }); zoneData.value = data; }
+    catch { zoneData.value = []; }
+};
+
+const selectEvent = async (id) => { selectedEventId.value = id; await loadZones(); };
+
+onMounted(async () => {
+    if (token.value) {
+        try {
+            const { data } = await ax().get('/api/auth/me');
+            if (data?.role === 'validator') {
+                window.location.href = '/validador';
+                return;
+            }
+
+            window.location.href = '/vendedor';
+        }
+        catch { doLogout(); }
+    }
+});
+
+const currency = v => '$' + Number(v || 0).toLocaleString('es-MX', { minimumFractionDigits: 0 });
+const fmtDate = d => { if (!d) return ''; return new Date(d).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }); };
+const totalCap = ev => (ev.zones || []).reduce((s, z) => s + (z.capacity || 0), 0);
+const totalSold = ev => (ev.zones || []).reduce((s, z) => s + (z.tickets_count ?? z.sold ?? 0), 0);
+const totalRevenue = ev => (ev.zones || []).reduce((s, z) => s + (z.tickets_count ?? z.sold ?? 0) * (z.price || 0), 0);
+const avgTicketPrice = computed(() => summary.value.tickets_sold > 0 ? Math.round(summary.value.revenue_total / summary.value.tickets_sold) : 0);
+
+const totalZoneTickets = computed(() => zoneData.value.reduce((s, z) => s + Number(z.tickets || 0), 0));
+const donutSegments = computed(() => {
+    const total = totalZoneTickets.value;
+    if (total === 0) return [];
+    const colors = ['#8B1A1A', '#C8922A', '#1A4A2E', '#6B6055', '#42A5F5', '#FF9800', '#9C27B0'];
+    const circumference = 2 * Math.PI * 35;
+    let offset = 0;
+    return zoneData.value.map((z, i) => {
+        const pct = Number(z.tickets) / total;
+        const dash = pct * circumference;
+        const seg = { zone: z.zone, tickets: z.tickets, pct: (pct * 100).toFixed(0), color: colors[i % colors.length], dasharray: `${dash} ${circumference - dash}`, dashoffset: -offset };
+        offset += dash;
+        return seg;
     });
 });
+
+const sortedEvents = computed(() => [...events.value].sort((a, b) => totalRevenue(b) - totalRevenue(a)).slice(0, 10));
 </script>
 
 <template>
     <nav class="topbar">
         <a href="/" class="topbar-brand">Chárro<span>Tickets</span></a>
         <div class="topbar-nav">
-            <a href="/">Inicio</a>
-            <a href="/compra">Comprar</a>
-            <a href="/validador">Validador</a>
-            <a href="/admin">Admin</a>
-            <a href="/reportes" class="active">Reportes</a>
+            <a v-if="token" href="#" class="active" @click.prevent="doLogout">Cerrar Sesion</a>
+            <a v-else href="/">Inicio</a>
         </div>
     </nav>
-    <div class="page-label">Vista 5 / 5 — Reportes y Estadísticas</div>
+    <div class="page-label">Reportes y Estadísticas</div>
 
-    <div class="report-layout">
+    <!-- Login -->
+    <div v-if="!token" style="padding:80px 40px;text-align:center;">
+        <div style="font-size:64px;margin-bottom:16px;">🔐</div>
+        <div class="section-title" style="margin-bottom:8px;font-family:'Playfair Display',serif;font-size:24px;color:var(--dorado-claro);">Acceso a Reportes</div>
+        <div style="font-family:'DM Mono',monospace;font-size:11px;color:var(--gris);margin-bottom:24px;">Inicia sesión con tu cuenta de vendedor</div>
+        <div style="max-width:350px;margin:0 auto;display:flex;flex-direction:column;gap:12px;">
+            <input v-model="loginName" type="text" placeholder="Usuario o correo" @keyup.enter="doLogin" style="background:rgba(0,0,0,0.5);border:1px solid rgba(200,146,42,0.3);padding:12px 16px;color:var(--crema);font-family:'DM Mono',monospace;font-size:12px;outline:none;">
+            <input v-model="loginPass" type="password" placeholder="Contraseña" @keyup.enter="doLogin" style="background:rgba(0,0,0,0.5);border:1px solid rgba(200,146,42,0.3);padding:12px 16px;color:var(--crema);font-family:'DM Mono',monospace;font-size:12px;outline:none;">
+            <div v-if="loginError" style="color:#F44336;font-family:'DM Mono',monospace;font-size:11px;">{{ loginError }}</div>
+            <button @click="doLogin" :disabled="loggingIn" style="background:var(--rojo);border:none;padding:14px;color:var(--crema);font-family:'DM Mono',monospace;font-size:12px;letter-spacing:2px;cursor:pointer;">{{ loggingIn ? 'INICIANDO...' : 'INICIAR SESIÓN' }}</button>
+        </div>
+    </div>
+
+    <!-- Reportes -->
+    <div v-else class="report-layout">
         <div class="admin-sidebar">
             <div class="nav-group-label">Principal</div>
-            <a href="/admin" class="nav-item">📊 Dashboard</a>
-            <a href="/admin" class="nav-item">📅 Eventos</a>
+            <a href="/vendedor" class="nav-item">📊 Dashboard</a>
             <div class="nav-group-label">Reportes</div>
-            <a href="#" class="nav-item active">📈 Ventas</a>
-            <a href="#" class="nav-item">👥 Compradores</a>
-            <a href="#" class="nav-item">🎫 Por Evento</a>
-            <a href="#" class="nav-item">💳 Pagos</a>
-            <a href="#" class="nav-item">✅ Asistencia</a>
-            <a href="#" class="nav-item">🛡️ Seguridad</a>
+            <a href="/reportes" class="nav-item active">📈 Ventas</a>
+            <div class="nav-group-label">Sistema</div>
+            <a href="#" class="nav-item" @click.prevent="doLogout">🚪 Cerrar sesión</a>
         </div>
 
         <div class="report-main">
             <div class="report-header">
                 <div>
                     <div class="report-title">Reportes de Ventas</div>
-                    <div class="report-subtitle">ENERO — MARZO 2025 · Todos los eventos</div>
-                </div>
-                <div class="header-actions">
-                    <button class="btn-outline">⬇ Excel</button>
-                    <button class="btn-outline">⬇ PDF</button>
-                    <button class="btn-primary">📊 Personalizar</button>
+                    <div class="report-subtitle">{{ new Date().toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).toUpperCase() }} · Todos los eventos</div>
                 </div>
             </div>
 
-            <div class="date-tabs">
-                <div class="date-tab">Hoy</div>
-                <div class="date-tab">7 días</div>
-                <div class="date-tab active">30 días</div>
-                <div class="date-tab">Este año</div>
-                <div class="date-tab">Personalizado</div>
-            </div>
+            <div v-if="loading" style="text-align:center;padding:60px;font-family:'DM Mono',monospace;color:var(--gris);">Cargando reportes...</div>
 
-            <div class="kpi-row">
-                <div class="kpi-mini">
-                    <div class="kpi-mini-label">Total Vendido</div>
-                    <div class="kpi-mini-val">$1.24M</div>
-                    <div class="kpi-mini-trend trend-up">▲ 8.2%</div>
-                </div>
-                <div class="kpi-mini">
-                    <div class="kpi-mini-label">Tickets</div>
-                    <div class="kpi-mini-val">3,847</div>
-                    <div class="kpi-mini-trend trend-up">▲ 12.1%</div>
-                </div>
-                <div class="kpi-mini">
-                    <div class="kpi-mini-label">Ticket Prom.</div>
-                    <div class="kpi-mini-val">$492</div>
-                    <div class="kpi-mini-trend trend-up">▲ 3.4%</div>
-                </div>
-                <div class="kpi-mini">
-                    <div class="kpi-mini-label">Conversión</div>
-                    <div class="kpi-mini-val">6.8%</div>
-                    <div class="kpi-mini-trend trend-down">▼ 0.3%</div>
-                </div>
-                <div class="kpi-mini">
-                    <div class="kpi-mini-label">Reembolsos</div>
-                    <div class="kpi-mini-val">$8,400</div>
-                    <div class="kpi-mini-trend trend-up">▼ 2.1%</div>
-                </div>
-            </div>
-
-            <div class="chart-card">
-                <div class="chart-header">
-                    <div class="chart-title">Ventas Semanales — Últimas 8 Semanas</div>
-                    <div class="chart-legend">
-                        <div class="legend-item"><div class="legend-dot" style="background:var(--rojo)"></div>Palco VIP</div>
-                        <div class="legend-item"><div class="legend-dot" style="background:var(--dorado)"></div>Gradería</div>
-                        <div class="legend-item"><div class="legend-dot" style="background:var(--verde)"></div>General</div>
+            <template v-else>
+                <!-- KPIs -->
+                <div class="kpi-row">
+                    <div class="kpi-mini">
+                        <div class="kpi-mini-label">Total Vendido</div>
+                        <div class="kpi-mini-val">{{ currency(summary.revenue_total) }}</div>
+                    </div>
+                    <div class="kpi-mini">
+                        <div class="kpi-mini-label">Tickets</div>
+                        <div class="kpi-mini-val">{{ summary.tickets_sold?.toLocaleString() }}</div>
+                    </div>
+                    <div class="kpi-mini">
+                        <div class="kpi-mini-label">Ticket Prom.</div>
+                        <div class="kpi-mini-val">{{ currency(avgTicketPrice) }}</div>
+                    </div>
+                    <div class="kpi-mini">
+                        <div class="kpi-mini-label">Asistencia</div>
+                        <div class="kpi-mini-val">{{ summary.attendance_rate }}%</div>
+                    </div>
+                    <div class="kpi-mini">
+                        <div class="kpi-mini-label">Órdenes</div>
+                        <div class="kpi-mini-val">{{ summary.orders_count?.toLocaleString() }}</div>
                     </div>
                 </div>
-                <div class="bar-chart-wrap">
-                    <div class="bar-chart">
-                        <div class="y-labels">
-                            <div class="y-label">0</div>
-                            <div class="y-label">150</div>
-                            <div class="y-label">300</div>
-                            <div class="y-label">450</div>
-                            <div class="y-label">600</div>
+
+                <!-- Zone distribution for selected event -->
+                <div class="two-col">
+                    <div class="chart-card">
+                        <div class="chart-header">
+                            <div class="chart-title">Distribución por Zona</div>
                         </div>
-                        <div v-for="item in bars" :key="item.label" class="bar-group">
-                            <div class="bar-val">{{ item.total }}</div>
-                            <div class="bar-stack" :style="{ height: item.stackHeight }">
-                                <div class="bar" :style="{ height: item.genHeight, background: '#1A4A2E' }" :title="`General: ${item.gen}`"></div>
-                                <div class="bar" :style="{ height: item.premHeight, background: '#C8922A' }" :title="`Gradería: ${item.prem}`"></div>
-                                <div class="bar" :style="{ height: item.vipHeight, background: '#8B1A1A' }" :title="`VIP: ${item.vip}`"></div>
-                                <div class="bar-label">{{ item.label }}</div>
+                        <div style="margin-bottom:12px;">
+                            <select @change="selectEvent(Number($event.target.value))" :value="selectedEventId"
+                                style="background:rgba(0,0,0,0.5);border:1px solid rgba(200,146,42,0.3);padding:8px 12px;color:var(--crema);font-family:'DM Mono',monospace;font-size:11px;outline:none;width:100%;">
+                                <option v-for="ev in events" :key="ev.id" :value="ev.id">{{ ev.name }}</option>
+                            </select>
+                        </div>
+                        <div class="donut-wrap" v-if="donutSegments.length">
+                            <div class="donut-svg-wrap">
+                                <svg viewBox="0 0 100 100">
+                                    <circle v-for="(seg, i) in donutSegments" :key="i" cx="50" cy="50" r="35" fill="none" :stroke="seg.color" stroke-width="18" :stroke-dasharray="seg.dasharray" :stroke-dashoffset="seg.dashoffset" transform="rotate(-90 50 50)" />
+                                    <circle cx="50" cy="50" r="25" fill="#1A0800" />
+                                </svg>
+                                <div class="donut-center">
+                                    <div class="donut-center-val">{{ totalZoneTickets.toLocaleString() }}</div>
+                                    <div class="donut-center-label">Tickets</div>
+                                </div>
+                            </div>
+                            <div class="donut-legend">
+                                <div v-for="seg in donutSegments" :key="seg.zone" class="donut-legend-item">
+                                    <div class="donut-legend-left"><div class="donut-legend-dot" :style="{ background: seg.color }"></div><div class="donut-legend-name">{{ seg.zone }}</div></div>
+                                    <div class="donut-legend-pct">{{ seg.pct }}%</div>
+                                </div>
                             </div>
                         </div>
+                        <div v-else style="text-align:center;padding:30px;font-family:'DM Mono',monospace;color:var(--gris);font-size:11px;">Sin datos de zona</div>
+                    </div>
+
+                    <div class="chart-card">
+                        <div class="chart-header">
+                            <div class="chart-title">Métricas Clave</div>
+                        </div>
+                        <div>
+                            <div class="metric-row"><div class="metric-name">Ingresos Totales</div><div class="metric-val">{{ currency(summary.revenue_total) }}</div></div>
+                            <div class="metric-row"><div class="metric-name">Ticket Promedio</div><div class="metric-val">{{ currency(avgTicketPrice) }}</div></div>
+                            <div class="metric-row"><div class="metric-name">Tasa de Asistencia</div><div class="metric-val up">{{ summary.attendance_rate }}%</div></div>
+                            <div class="metric-row"><div class="metric-name">Intentos Inválidos</div><div class="metric-val">{{ summary.fraud_attempts }}</div></div>
+                            <div class="metric-row"><div class="metric-name">Órdenes Totales</div><div class="metric-val">{{ summary.orders_count }}</div></div>
+                            <div class="metric-row" style="border:none"><div class="metric-name">Eventos Registrados</div><div class="metric-val">{{ events.length }}</div></div>
+                        </div>
                     </div>
                 </div>
-            </div>
 
-            <div class="two-col">
+                <!-- Top Events -->
                 <div class="chart-card">
                     <div class="chart-header">
-                        <div class="chart-title">Distribución por Zona</div>
+                        <div class="chart-title">Top Eventos por Ingresos</div>
                     </div>
-                    <div class="donut-wrap">
-                        <div class="donut-svg-wrap">
-                            <svg viewBox="0 0 100 100">
-                                <circle cx="50" cy="50" r="35" fill="none" stroke="#8B1A1A" stroke-width="18" stroke-dasharray="79.2 221" stroke-dashoffset="0" transform="rotate(-90 50 50)" />
-                                <circle cx="50" cy="50" r="35" fill="none" stroke="#C8922A" stroke-width="18" stroke-dasharray="61.6 238.6" stroke-dashoffset="-79.2" transform="rotate(-90 50 50)" />
-                                <circle cx="50" cy="50" r="35" fill="none" stroke="#1A4A2E" stroke-width="18" stroke-dasharray="41.8 258.4" stroke-dashoffset="-140.8" transform="rotate(-90 50 50)" />
-                                <circle cx="50" cy="50" r="35" fill="none" stroke="#6B6055" stroke-width="18" stroke-dasharray="37.4 262.8" stroke-dashoffset="-182.6" transform="rotate(-90 50 50)" />
-                                <circle cx="50" cy="50" r="25" fill="#1A0800" />
-                            </svg>
-                            <div class="donut-center">
-                                <div class="donut-center-val">3,847</div>
-                                <div class="donut-center-label">Tickets</div>
-                            </div>
-                        </div>
-                        <div class="donut-legend">
-                            <div class="donut-legend-item">
-                                <div class="donut-legend-left"><div class="donut-legend-dot" style="background:var(--rojo)"></div><div class="donut-legend-name">Palco VIP</div></div>
-                                <div class="donut-legend-pct">36%</div>
-                            </div>
-                            <div class="donut-legend-item">
-                                <div class="donut-legend-left"><div class="donut-legend-dot" style="background:var(--dorado)"></div><div class="donut-legend-name">Gradería Premium</div></div>
-                                <div class="donut-legend-pct">28%</div>
-                            </div>
-                            <div class="donut-legend-item">
-                                <div class="donut-legend-left"><div class="donut-legend-dot" style="background:var(--verde)"></div><div class="donut-legend-name">General</div></div>
-                                <div class="donut-legend-pct">19%</div>
-                            </div>
-                            <div class="donut-legend-item">
-                                <div class="donut-legend-left"><div class="donut-legend-dot" style="background:var(--gris)"></div><div class="donut-legend-name">Niños</div></div>
-                                <div class="donut-legend-pct">17%</div>
-                            </div>
-                        </div>
-                    </div>
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Evento</th>
+                                <th>Fecha</th>
+                                <th>Tickets</th>
+                                <th>Ingreso</th>
+                                <th>Ticket Prom.</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="(ev, idx) in sortedEvents" :key="ev.id">
+                                <td><span :style="{ fontFamily: 'Playfair Display, serif', color: idx < 1 ? 'var(--dorado-claro)' : 'var(--gris)', fontSize: '18px' }">{{ idx + 1 }}</span></td>
+                                <td><b>{{ ev.name }}</b></td>
+                                <td>{{ fmtDate(ev.starts_at) }}</td>
+                                <td>{{ totalSold(ev).toLocaleString() }}</td>
+                                <td style="font-family:'Playfair Display',serif;color:var(--dorado-claro);">{{ currency(totalRevenue(ev)) }}</td>
+                                <td>{{ totalCap(ev) > 0 ? currency(Math.round(totalRevenue(ev) / Math.max(1, totalSold(ev)))) : '$0' }}</td>
+                            </tr>
+                            <tr v-if="sortedEvents.length === 0">
+                                <td colspan="6" style="text-align:center;padding:20px;font-family:'DM Mono',monospace;color:var(--gris);">No hay eventos.</td>
+                            </tr>
+                        </tbody>
+                    </table>
                 </div>
 
-                <div class="chart-card">
+                <!-- Zone details table -->
+                <div v-if="zoneData.length" class="chart-card">
                     <div class="chart-header">
-                        <div class="chart-title">Métricas Clave del Período</div>
+                        <div class="chart-title">Detalle por Zona — {{ events.find(e => e.id === selectedEventId)?.name || '' }}</div>
                     </div>
-                    <div>
-                        <div class="metric-row"><div class="metric-name">Ingresos Totales</div><div class="metric-val">$1,243,400</div></div>
-                        <div class="metric-row"><div class="metric-name">Ticket Promedio</div><div class="metric-val">$492</div></div>
-                        <div class="metric-row"><div class="metric-name">Tasa de Asistencia</div><div class="metric-val up">89.2%</div></div>
-                        <div class="metric-row"><div class="metric-name">Tickets Fraudulentos</div><div class="metric-val up">0.02%</div></div>
-                        <div class="metric-row"><div class="metric-name">Tasa de Reembolso</div><div class="metric-val up">0.68%</div></div>
-                        <div class="metric-row"><div class="metric-name">Eventos Completados</div><div class="metric-val">24</div></div>
-                        <div class="metric-row"><div class="metric-name">Satisfacción Cliente</div><div class="metric-val up">4.7 / 5</div></div>
-                        <div class="metric-row" style="border:none"><div class="metric-name">Métodos de Pago — Top</div><div class="metric-val" style="font-size:13px;">Tarjeta 64%</div></div>
-                    </div>
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Zona</th>
+                                <th>Tickets Vendidos</th>
+                                <th>Ingreso</th>
+                                <th>Asistieron</th>
+                                <th>% Asistencia</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="z in zoneData" :key="z.zone">
+                                <td><b>{{ z.zone }}</b></td>
+                                <td>{{ Number(z.tickets).toLocaleString() }}</td>
+                                <td style="font-family:'Playfair Display',serif;color:var(--dorado-claro);">{{ currency(z.amount) }}</td>
+                                <td>{{ Number(z.assisted).toLocaleString() }}</td>
+                                <td><span :style="{ color: Number(z.attendance_rate) >= 80 ? '#4CAF50' : '#FF9800' }">{{ z.attendance_rate }}%</span></td>
+                            </tr>
+                        </tbody>
+                    </table>
                 </div>
-            </div>
-
-            <div class="chart-card">
-                <div class="chart-header">
-                    <div class="chart-title">Top Eventos por Ingresos</div>
-                </div>
-                <table class="data-table">
-                    <thead>
-                        <tr>
-                            <th>#</th>
-                            <th>Evento</th>
-                            <th>Fecha</th>
-                            <th>Tickets</th>
-                            <th>Ingreso</th>
-                            <th>Ticket Prom.</th>
-                            <th>Asistencia</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td><span style="font-family:'Playfair Display',serif;color:var(--dorado-claro);font-size:18px;">1</span></td>
-                            <td><b>Lienzo Charro Internacional</b></td>
-                            <td>05 Abr 2025</td>
-                            <td>1,200</td>
-                            <td style="font-family:'Playfair Display',serif;color:var(--dorado-claro);">$576,000</td>
-                            <td>$480</td>
-                            <td><span style="color:#4CAF50;">94%</span></td>
-                        </tr>
-                        <tr>
-                            <td><span style="font-family:'Playfair Display',serif;color:var(--crema);font-size:18px;">2</span></td>
-                            <td><b>Gran Campeonato Nacional</b></td>
-                            <td>15 Mar 2025</td>
-                            <td>847</td>
-                            <td style="font-family:'Playfair Display',serif;color:var(--dorado-claro);">$423,500</td>
-                            <td>$500</td>
-                            <td><span style="color:#4CAF50;">91%</span></td>
-                        </tr>
-                        <tr>
-                            <td><span style="font-family:'Playfair Display',serif;color:var(--gris);font-size:18px;">3</span></td>
-                            <td><b>Charreada Norteña Primavera</b></td>
-                            <td>19 Abr 2025</td>
-                            <td>620</td>
-                            <td style="font-family:'Playfair Display',serif;color:var(--dorado-claro);">$186,000</td>
-                            <td>$300</td>
-                            <td><span style="color:#FF9800;">82%</span></td>
-                        </tr>
-                        <tr>
-                            <td><span style="font-family:'Playfair Display',serif;color:var(--gris);font-size:18px;">4</span></td>
-                            <td><b>Torneo Estatal Escaramuzas</b></td>
-                            <td>22 Mar 2025</td>
-                            <td>342</td>
-                            <td style="font-family:'Playfair Display',serif;color:var(--dorado-claro);">$68,400</td>
-                            <td>$200</td>
-                            <td><span style="color:#FF9800;">78%</span></td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
+            </template>
         </div>
     </div>
 </template>

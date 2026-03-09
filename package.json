@@ -4,18 +4,21 @@
     "type": "module",
     "scripts": {
         "build": "vite build",
-        "dev": "vite"
+        "dev": "vite",
+        "desktop:compra": "set DESKTOP_VIEW=compra&& set APP_BASE_URL=http://127.0.0.1:8000&& electron desktop/main.cjs",
+        "desktop:validador": "set DESKTOP_VIEW=validador&& set APP_BASE_URL=http://127.0.0.1:8000&& electron desktop/main.cjs"
     },
     "devDependencies": {
         "@tailwindcss/vite": "^4.0.0",
         "axios": "^1.11.0",
         "concurrently": "^9.0.1",
+        "electron": "^37.2.4",
         "laravel-vite-plugin": "^2.0.0",
         "tailwindcss": "^4.0.0",
-        "vite": "^7.0.7"
+        "vite": "^7.1.5"
     },
     "dependencies": {
-        "@vitejs/plugin-vue": "^6.0.0",
+        "@vitejs/plugin-vue": "^6.0.1",
         "vue": "^3.5.0"
     }
 }

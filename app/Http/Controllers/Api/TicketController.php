@@ -12,7 +12,7 @@ class TicketController extends Controller
     public function show(string $code): JsonResponse
     {
         $ticket = Ticket::query()
-            ->with('event', 'zone', 'order')
+            ->with('event', 'zone', 'order', 'item')
             ->where('ticket_code', $code)
             ->firstOrFail();
 
@@ -22,7 +22,7 @@ class TicketController extends Controller
     public function downloadPdf(string $code)
     {
         $ticket = Ticket::query()
-            ->with('event', 'zone', 'order')
+            ->with('event', 'zone', 'order', 'item')
             ->where('ticket_code', $code)
             ->firstOrFail();
 

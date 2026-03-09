@@ -1,159 +1,140 @@
+<script setup>
+import { ref, computed, onMounted } from 'vue';
+
+const events = ref([]);
+const loading = ref(true);
+const search = ref('');
+
+const gradients = [
+    'linear-gradient(135deg, #5A0000, #8B1A1A)',
+    'linear-gradient(135deg, #1A4A2E, #2D7A4A)',
+    'linear-gradient(135deg, #3D2008, #7A4010)',
+    'linear-gradient(135deg, #0A2A4A, #1A4A7A)',
+    'linear-gradient(135deg, #3A1A4A, #6A3A7A)',
+    'linear-gradient(135deg, #1A3A1A, #2A6A2A)',
+];
+const icons = ['🐎', '🤠', '🏟️', '🎭', '🌟', '🎪'];
+
+onMounted(async () => {
+    try {
+        const { data } = await window.axios.get('/api/events');
+        events.value = data.data || data;
+    } catch (e) {
+        console.error('Error cargando eventos:', e);
+    } finally {
+        loading.value = false;
+    }
+});
+
+const featured = computed(() => events.value[0] || null);
+const rest = computed(() => events.value.slice(1));
+
+const totalSold = computed(() => {
+    return events.value.reduce((sum, ev) => {
+        return sum + (ev.zones || []).reduce((s, z) => s + z.sold_count, 0);
+    }, 0);
+});
+
+const totalCapacity = (ev) => (ev.zones || []).reduce((s, z) => s + z.capacity, 0);
+const totalSoldEv = (ev) => (ev.zones || []).reduce((s, z) => s + z.sold_count, 0);
+const minPrice = (ev) => {
+    const prices = (ev.zones || []).map(z => parseFloat(z.price));
+    return prices.length ? Math.min(...prices) : 0;
+};
+const isSoldOut = (ev) => {
+    const cap = totalCapacity(ev);
+    return cap > 0 && totalSoldEv(ev) >= cap;
+};
+const fillPct = (ev) => {
+    const cap = totalCapacity(ev);
+    return cap > 0 ? ((totalSoldEv(ev) / cap) * 100).toFixed(0) : 0;
+};
+const formatDate = (d) => {
+    if (!d) return '';
+    const dt = new Date(d);
+    return dt.toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase();
+};
+const shortDate = (d) => {
+    if (!d) return '';
+    const dt = new Date(d);
+    return dt.toLocaleDateString('es-MX', { day: '2-digit', month: 'short' }).toUpperCase();
+};
+const currency = (v) => `$${Number(v).toLocaleString('es-MX')}`;
+</script>
+
 <template>
     <nav class="topbar">
         <a href="/" class="topbar-brand">Chárro<span>Tickets</span></a>
         <div class="topbar-nav">
             <a href="/" class="active">Inicio</a>
-            <a href="/compra">Comprar</a>
-            <a href="/validador">Validador</a>
-            <a href="/admin">Admin</a>
-            <a href="/reportes">Reportes</a>
+            <a href="/vendedor">Iniciar sesion</a>
         </div>
     </nav>
-    <div class="page-label">Vista 1 / 5 — Portal Público</div>
+    <div class="page-label">Portal Público — Eventos en vivo</div>
 
     <section class="hero">
         <div class="hero-badge">Plataforma Oficial de Charreada · México</div>
         <h1 class="hero-title">Chárro<span>Tickets</span></h1>
         <p class="hero-sub">Tu acceso a las mejores charreadas de México — compra segura en línea</p>
         <div class="search-bar">
-            <input type="text" placeholder="Buscar evento, ciudad, lienzo charro...">
+            <input v-model="search" type="text" placeholder="Buscar evento, ciudad, lienzo charro...">
             <button>Buscar</button>
         </div>
-        <div class="filter-chips">
-            <div class="chip active">Todos</div>
-            <div class="chip">Jalisco</div>
-            <div class="chip">CDMX</div>
-            <div class="chip">Querétaro</div>
-            <div class="chip">Guanajuato</div>
-            <div class="chip">Nuevo León</div>
-            <div class="chip">Este mes</div>
-        </div>
         <div class="stats-bar">
-            <div class="stat-item"><div class="stat-val">47</div><div class="stat-label">Eventos activos</div></div>
-            <div class="stat-item"><div class="stat-val">18</div><div class="stat-label">Estados</div></div>
-            <div class="stat-item"><div class="stat-val">12K+</div><div class="stat-label">Tickets vendidos</div></div>
+            <div class="stat-item"><div class="stat-val">{{ events.length }}</div><div class="stat-label">Eventos activos</div></div>
+            <div class="stat-item"><div class="stat-val">{{ totalSold.toLocaleString() }}</div><div class="stat-label">Tickets vendidos</div></div>
         </div>
     </section>
 
-    <div class="events-section">
-        <div class="section-header">
-            <div class="section-title">Evento Destacado</div>
-        </div>
-        <div class="featured-card">
-            <div>
-                <div class="featured-title">Gran Campeonato Nacional de Charreada 2025</div>
-                <div class="featured-meta">📅 SAB 15 MAR 2025 · 10:00 AM &nbsp;&nbsp; 📍 Lienzo Charro Guadalajara, Jalisco</div>
-                <div class="featured-tags">
-                    <div class="tag">Campeonato Nacional</div>
-                    <div class="tag">Charreada Completa</div>
-                    <div class="tag">10 Suertes</div>
-                    <div class="tag">Escaramuzas</div>
-                </div>
-                <div class="capacity-bar-wrap">
-                    <div class="capacity-label"><span>Disponibilidad</span><span>847 / 1,200 vendidos</span></div>
-                    <div class="capacity-bar"><div class="capacity-fill" style="width: 70%;"></div></div>
-                </div>
-            </div>
-            <div class="featured-price">
-                <span class="featured-price-val">$350</span>
-                <span class="featured-price-label">Desde</span>
-                <br><br>
-                <a href="/compra"><button class="btn-comprar" style="padding: 14px 28px; font-size: 12px;">Comprar Ahora →</button></a>
-            </div>
-        </div>
+    <div v-if="loading" style="text-align:center;padding:60px;font-family:'DM Mono',monospace;color:var(--gris);letter-spacing:2px;">Cargando eventos...</div>
 
-        <div class="section-header">
+    <div v-else-if="events.length === 0" style="text-align:center;padding:60px;font-family:'DM Mono',monospace;color:var(--gris);letter-spacing:2px;">No hay eventos publicados aún.</div>
+
+    <div v-else class="events-section">
+        <template v-if="featured">
+            <div class="section-header">
+                <div class="section-title">Evento Destacado</div>
+            </div>
+            <div class="featured-card">
+                <div>
+                    <div class="featured-title">{{ featured.name }}</div>
+                    <div class="featured-meta">📅 {{ formatDate(featured.starts_at) }} &nbsp;&nbsp; 📍 {{ featured.venue }}, {{ featured.city }}</div>
+                    <div class="featured-tags" v-if="featured.description">
+                        <div class="tag">{{ featured.status }}</div>
+                        <div class="tag" v-for="zone in (featured.zones || [])" :key="zone.id">{{ zone.name }}</div>
+                    </div>
+                    <div class="capacity-bar-wrap">
+                        <div class="capacity-label"><span>Disponibilidad</span><span>{{ totalSoldEv(featured).toLocaleString() }} / {{ totalCapacity(featured).toLocaleString() }} vendidos</span></div>
+                        <div class="capacity-bar"><div class="capacity-fill" :style="{ width: fillPct(featured) + '%' }"></div></div>
+                    </div>
+                </div>
+                <div class="featured-price">
+                    <span class="featured-price-val">{{ currency(minPrice(featured)) }}</span>
+                    <span class="featured-price-label">Desde</span>
+                    <br><br>
+                    <a :href="`/compra?event=${featured.id}`"><button class="btn-comprar" style="padding: 14px 28px; font-size: 12px;">Comprar Ahora →</button></a>
+                </div>
+            </div>
+        </template>
+
+        <div class="section-header" v-if="rest.length">
             <div class="section-title">Próximos Eventos</div>
-            <a href="#" class="view-all">Ver todos →</a>
         </div>
         <div class="events-grid">
-            <div class="event-card">
-                <div class="card-img" style="background: linear-gradient(135deg, #5A0000, #8B1A1A);">
-                    🐎 <div class="card-date-badge">22 MAR</div>
+            <div v-for="(ev, idx) in rest" :key="ev.id" class="event-card">
+                <div class="card-img" :style="{ background: gradients[idx % gradients.length] }">
+                    {{ icons[idx % icons.length] }}
+                    <div class="card-date-badge">{{ shortDate(ev.starts_at) }}</div>
+                    <div v-if="isSoldOut(ev)" class="card-sold-badge">AGOTADO</div>
                 </div>
                 <div class="card-body">
-                    <div class="card-location">📍 Ciudad de México, CDMX</div>
-                    <div class="card-title">Torneo Estatal de Escaramuzas</div>
-                    <div class="card-desc">Competencia regional con los mejores equipos de escaramuzas del centro del país.</div>
+                    <div class="card-location">📍 {{ ev.city }}</div>
+                    <div class="card-title">{{ ev.name }}</div>
+                    <div class="card-desc">{{ ev.description || ev.venue }}</div>
                     <div class="card-footer">
-                        <div class="price-tag"><small>Desde</small>$200</div>
-                        <a href="/compra"><button class="btn-comprar">Comprar</button></a>
-                    </div>
-                </div>
-            </div>
-
-            <div class="event-card">
-                <div class="card-img" style="background: linear-gradient(135deg, #1A4A2E, #2D7A4A);">
-                    🤠 <div class="card-date-badge">05 ABR</div>
-                    <div class="card-sold-badge">AGOTADO</div>
-                </div>
-                <div class="card-body">
-                    <div class="card-location">📍 Querétaro, Qro.</div>
-                    <div class="card-title">Lienzo Charro Internacional 2025</div>
-                    <div class="card-desc">El evento charro más importante de la región, con equipos de México y el extranjero.</div>
-                    <div class="card-footer">
-                        <div class="price-tag"><small>Desde</small>$480</div>
-                        <button class="btn-agotado">Agotado</button>
-                    </div>
-                </div>
-            </div>
-
-            <div class="event-card">
-                <div class="card-img" style="background: linear-gradient(135deg, #3D2008, #7A4010);">
-                    🏟️ <div class="card-date-badge">19 ABR</div>
-                </div>
-                <div class="card-body">
-                    <div class="card-location">📍 Monterrey, Nuevo León</div>
-                    <div class="card-title">Charreada Norteña Primavera</div>
-                    <div class="card-desc">Tradición charra del norte. Coleadero, jineteo de toro y todas las suertes charras.</div>
-                    <div class="card-footer">
-                        <div class="price-tag"><small>Desde</small>$300</div>
-                        <a href="/compra"><button class="btn-comprar">Comprar</button></a>
-                    </div>
-                </div>
-            </div>
-
-            <div class="event-card">
-                <div class="card-img" style="background: linear-gradient(135deg, #0A2A4A, #1A4A7A);">
-                    🎭 <div class="card-date-badge">03 MAY</div>
-                </div>
-                <div class="card-body">
-                    <div class="card-location">📍 Guadalajara, Jalisco</div>
-                    <div class="card-title">Fiesta Charra de Mayo</div>
-                    <div class="card-desc">Celebración tradicional con charreada, música de mariachi y gastronomía jalisciense.</div>
-                    <div class="card-footer">
-                        <div class="price-tag"><small>Desde</small>$250</div>
-                        <a href="/compra"><button class="btn-comprar">Comprar</button></a>
-                    </div>
-                </div>
-            </div>
-
-            <div class="event-card">
-                <div class="card-img" style="background: linear-gradient(135deg, #3A1A4A, #6A3A7A);">
-                    🌟 <div class="card-date-badge">17 MAY</div>
-                </div>
-                <div class="card-body">
-                    <div class="card-location">📍 San Luis Potosí, SLP</div>
-                    <div class="card-title">Campeonato Regional Bajío</div>
-                    <div class="card-desc">Los mejores charros del Bajío se reúnen en este torneo regional.</div>
-                    <div class="card-footer">
-                        <div class="price-tag"><small>Desde</small>$320</div>
-                        <a href="/compra"><button class="btn-comprar">Comprar</button></a>
-                    </div>
-                </div>
-            </div>
-
-            <div class="event-card">
-                <div class="card-img" style="background: linear-gradient(135deg, #1A3A1A, #2A6A2A);">
-                    🎪 <div class="card-date-badge">28 MAY</div>
-                </div>
-                <div class="card-body">
-                    <div class="card-location">📍 León, Guanajuato</div>
-                    <div class="card-title">Gran Festival Charro León 2025</div>
-                    <div class="card-desc">Tres días de charreada en el corazón del Bajío. El evento más esperado del año.</div>
-                    <div class="card-footer">
-                        <div class="price-tag"><small>Desde</small>$400</div>
-                        <a href="/compra"><button class="btn-comprar">Comprar</button></a>
+                        <div class="price-tag"><small>Desde</small>{{ currency(minPrice(ev)) }}</div>
+                        <a v-if="!isSoldOut(ev)" :href="`/compra?event=${ev.id}`"><button class="btn-comprar">Comprar</button></a>
+                        <button v-else class="btn-agotado">Agotado</button>
                     </div>
                 </div>
             </div>

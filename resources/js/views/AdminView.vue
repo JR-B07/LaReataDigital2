@@ -1,45 +1,180 @@
+<script setup>
+import { ref, computed, onMounted } from 'vue';
+
+const token = ref(localStorage.getItem('auth_token') || '');
+const user = ref(null);
+const loginName = ref('');
+const loginPass = ref('');
+const loginError = ref('');
+const loggingIn = ref(false);
+
+const events = ref([]);
+const summary = ref({ orders_count: 0, tickets_sold: 0, revenue_total: 0, attendance_rate: 0, fraud_attempts: 0 });
+const loading = ref(true);
+const search = ref('');
+const showForm = ref(false);
+const editingEvent = ref(null);
+
+const form = ref({ name: '', description: '', city: '', venue: '', starts_at: '', ends_at: '', barcode_format: 'qr', status: 'draft', zones: [{ name: '', capacity: '', price: '' }] });
+
+const ax = () => {
+    const i = window.axios.create();
+    if (token.value) i.defaults.headers.common['Authorization'] = `Bearer ${token.value}`;
+    return i;
+};
+
+const doLogin = async () => {
+    loggingIn.value = true; loginError.value = '';
+    try {
+        const { data } = await window.axios.post('/api/auth/login', { login: loginName.value, password: loginPass.value });
+        token.value = data.token;
+        user.value = data.user;
+        localStorage.setItem('auth_token', data.token);
+
+        if (data.user?.role === 'validator') {
+            window.location.href = '/validador';
+            return;
+        }
+
+        await loadData();
+    } catch (e) { loginError.value = e.response?.data?.message || 'Credenciales inválidas.'; }
+    finally { loggingIn.value = false; }
+};
+
+const doLogout = async () => {
+    try {
+        if (token.value) await ax().post('/api/auth/logout');
+    } catch {
+        // Ignore logout API errors and continue local cleanup.
+    }
+
+    token.value = '';
+    user.value = null;
+    localStorage.removeItem('auth_token');
+    window.location.href = '/';
+};
+
+const loadData = async () => {
+    loading.value = true;
+    try {
+        const [evRes, sumRes] = await Promise.all([ax().get('/api/seller/events'), ax().get('/api/seller/reports/summary')]);
+        events.value = evRes.data.data || evRes.data;
+        summary.value = sumRes.data;
+    } catch { /* noop */ }
+    finally { loading.value = false; }
+};
+
+onMounted(async () => {
+    if (token.value) {
+        try {
+            const { data } = await ax().get('/api/auth/me');
+            if (data?.role === 'validator') {
+                window.location.href = '/validador';
+                return;
+            }
+
+            user.value = data;
+            await loadData();
+        }
+        catch { doLogout(); }
+    }
+});
+
+const currency = v => '$' + Number(v || 0).toLocaleString('es-MX', { minimumFractionDigits: 0 });
+const fmtDate = d => { if (!d) return ''; const dt = new Date(d); return dt.toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }); };
+const fmtTime = d => { if (!d) return ''; return new Date(d).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }); };
+
+const totalCap = ev => (ev.zones || []).reduce((s, z) => s + (z.capacity || 0), 0);
+const totalSold = ev => (ev.zones || []).reduce((s, z) => s + (z.tickets_count ?? z.sold ?? 0), 0);
+const totalRevenue = ev => (ev.zones || []).reduce((s, z) => s + (z.tickets_count ?? z.sold ?? 0) * (z.price || 0), 0);
+const occupancy = ev => { const cap = totalCap(ev); return cap > 0 ? ((totalSold(ev) / cap) * 100).toFixed(1) : '0'; };
+const statusLabel = s => ({ draft: 'Borrador', published: 'Activo', canceled: 'Cancelado' })[s] || s;
+const statusClass = s => ({ draft: 'draft', published: 'active', canceled: 'sold' })[s] || 'draft';
+
+const filteredEvents = computed(() => {
+    if (!search.value) return events.value;
+    const q = search.value.toLowerCase();
+    return events.value.filter(e => e.name.toLowerCase().includes(q) || (e.city || '').toLowerCase().includes(q));
+});
+
+const icons = ['🐎','🤠','🏟️','🎪','🎭','🎯','🎵','🎶'];
+
+const startNewSale = () => {
+    const targetEvent = events.value.find((e) => e.status === 'published') || events.value[0];
+
+    if (!targetEvent) {
+        alert('No hay eventos disponibles para iniciar una venta.');
+        return;
+    }
+
+    window.location.href = `/compra?event=${targetEvent.id}`;
+};
+
+const openNew = () => { editingEvent.value = null; form.value = { name: '', description: '', city: '', venue: '', starts_at: '', ends_at: '', barcode_format: 'qr', status: 'draft', zones: [{ name: '', capacity: '', price: '' }] }; showForm.value = true; };
+const openEdit = (ev) => { editingEvent.value = ev; form.value = { name: ev.name, description: ev.description || '', city: ev.city, venue: ev.venue, starts_at: ev.starts_at?.slice(0, 16) || '', ends_at: ev.ends_at?.slice(0, 16) || '', barcode_format: ev.barcode_format || 'qr', status: ev.status, zones: (ev.zones || []).map(z => ({ name: z.name, capacity: z.capacity, price: z.price })) }; showForm.value = true; };
+const addZone = () => form.value.zones.push({ name: '', capacity: '', price: '' });
+const removeZone = i => form.value.zones.splice(i, 1);
+
+const saveEvent = async () => {
+    const payload = { ...form.value, zones: form.value.zones.map(z => ({ name: z.name, capacity: Number(z.capacity), price: Number(z.price) })) };
+    try {
+        if (editingEvent.value) await ax().put(`/api/seller/events/${editingEvent.value.id}`, payload);
+        else await ax().post('/api/seller/events', payload);
+        showForm.value = false; await loadData();
+    } catch (e) { alert(e.response?.data?.message || 'Error al guardar.'); }
+};
+
+const deleteEvent = async (ev) => { if (!confirm(`¿Eliminar "${ev.name}"?`)) return; try { await ax().delete(`/api/seller/events/${ev.id}`); await loadData(); } catch { alert('Error al eliminar.'); } };
+const publishEvent = async (ev) => { try { await ax().post(`/api/seller/events/${ev.id}/publish`); await loadData(); } catch { alert('Error al publicar.'); } };
+const cancelEvent = async (ev) => { try { await ax().post(`/api/seller/events/${ev.id}/cancel`); await loadData(); } catch { alert('Error al cancelar.'); } };
+</script>
+
 <template>
     <nav class="topbar">
         <a href="/" class="topbar-brand">Chárro<span>Tickets</span></a>
         <div class="topbar-nav">
-            <a href="/">Inicio</a>
-            <a href="/compra">Comprar</a>
-            <a href="/validador">Validador</a>
-            <a href="/admin" class="active">Admin</a>
-            <a href="/reportes">Reportes</a>
+            <a v-if="token" href="#" class="active" @click.prevent="doLogout">Cerrar Sesion</a>
+            <a v-else href="/">Inicio</a>
         </div>
     </nav>
-    <div class="page-label">Vista 4 / 5 — Panel de Administración</div>
+    <div class="page-label">Panel de Ventas</div>
 
-    <div class="admin-layout">
+    <!-- Login -->
+    <div v-if="!token" style="padding:80px 40px;text-align:center;">
+        <div style="font-size:64px;margin-bottom:16px;">🔐</div>
+        <div class="section-title" style="margin-bottom:8px;font-family:'Playfair Display',serif;font-size:24px;color:var(--dorado-claro);">Acceso de Vendedor</div>
+        <div style="font-family:'DM Mono',monospace;font-size:11px;color:var(--gris);margin-bottom:24px;">Inicia sesión con tu cuenta de vendedor</div>
+        <div style="max-width:350px;margin:0 auto;display:flex;flex-direction:column;gap:12px;">
+            <input v-model="loginName" type="text" placeholder="Usuario o correo" @keyup.enter="doLogin" style="background:rgba(0,0,0,0.5);border:1px solid rgba(200,146,42,0.3);padding:12px 16px;color:var(--crema);font-family:'DM Mono',monospace;font-size:12px;outline:none;">
+            <input v-model="loginPass" type="password" placeholder="Contraseña" @keyup.enter="doLogin" style="background:rgba(0,0,0,0.5);border:1px solid rgba(200,146,42,0.3);padding:12px 16px;color:var(--crema);font-family:'DM Mono',monospace;font-size:12px;outline:none;">
+            <div v-if="loginError" style="color:#F44336;font-family:'DM Mono',monospace;font-size:11px;">{{ loginError }}</div>
+            <button @click="doLogin" :disabled="loggingIn" style="background:var(--rojo);border:none;padding:14px;color:var(--crema);font-family:'DM Mono',monospace;font-size:12px;letter-spacing:2px;cursor:pointer;">{{ loggingIn ? 'INICIANDO...' : 'INICIAR SESIÓN' }}</button>
+        </div>
+    </div>
+
+    <!-- Admin Panel -->
+    <div v-else class="admin-layout">
         <div class="admin-sidebar">
             <div class="sidebar-user">
                 <div class="sidebar-avatar">👤</div>
-                <div class="sidebar-name">Ing. Raúl Vega</div>
-                <div class="sidebar-role">Administrador General</div>
+                <div class="sidebar-name">{{ user?.name || '...' }}</div>
+                <div class="sidebar-role">{{ user?.role === 'seller' ? 'Vendedor' : user?.role }}</div>
             </div>
 
             <div class="nav-group">
                 <div class="nav-group-label">Principal</div>
-                <a href="#" class="nav-item active">📊 Dashboard</a>
-                <a href="#" class="nav-item">📅 Eventos <span class="nav-badge">7</span></a>
-                <a href="#" class="nav-item">🎫 Boletos</a>
-                <a href="#" class="nav-item">👥 Compradores</a>
+                <a href="/vendedor" class="nav-item active">📊 Dashboard</a>
+                <a href="#" class="nav-item">📅 Eventos <span class="nav-badge">{{ events.length }}</span></a>
             </div>
 
             <div class="nav-group">
                 <div class="nav-group-label">Operaciones</div>
-                <a href="#" class="nav-item">💳 Pagos</a>
-                <a href="#" class="nav-item">📷 Validadores</a>
-                <a href="/reportes" class="nav-item">📈 Reportes</a>
-                <a href="#" class="nav-item">🏷️ Descuentos</a>
+                <a href="/vendedor/reportes" class="nav-item">📈 Reportes</a>
             </div>
 
             <div class="nav-group">
                 <div class="nav-group-label">Sistema</div>
-                <a href="#" class="nav-item">⚙️ Configuración</a>
-                <a href="#" class="nav-item">👤 Usuarios Admin</a>
-                <a href="#" class="nav-item">📋 Auditoría</a>
+                <a href="#" class="nav-item" @click.prevent="doLogout">🚪 Cerrar sesión</a>
             </div>
         </div>
 
@@ -47,259 +182,143 @@
             <div class="admin-header">
                 <div>
                     <div class="admin-title">Dashboard</div>
-                    <div class="admin-subtitle">MARTES 15 MAR 2025 · Última actualización: hace 3 min</div>
+                    <div class="admin-subtitle">{{ new Date().toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' }).toUpperCase() }}</div>
                 </div>
                 <div class="header-actions">
-                    <button class="btn-outline">⬇ Exportar</button>
-                    <button class="btn-primary">+ Nuevo Evento</button>
+                    <button class="btn-primary" @click="startNewSale">Nueva venta</button>
                 </div>
             </div>
 
+            <!-- KPIs -->
             <div class="kpi-grid">
                 <div class="kpi-card">
                     <div class="kpi-icon">🎫</div>
                     <div class="kpi-label">Tickets Vendidos</div>
-                    <div class="kpi-value">3,847</div>
-                    <div class="kpi-trend up">▲ 12% vs semana pasada</div>
+                    <div class="kpi-value">{{ summary.tickets_sold?.toLocaleString() }}</div>
                 </div>
                 <div class="kpi-card">
                     <div class="kpi-icon">💰</div>
                     <div class="kpi-label">Ingresos Totales</div>
-                    <div class="kpi-value">$1.2M</div>
-                    <div class="kpi-trend up">▲ 8% este mes</div>
-                </div>
-                <div class="kpi-card">
-                    <div class="kpi-icon">📅</div>
-                    <div class="kpi-label">Eventos Activos</div>
-                    <div class="kpi-value">7</div>
-                    <div class="kpi-trend up">3 en próximas 2 semanas</div>
+                    <div class="kpi-value">{{ currency(summary.revenue_total) }}</div>
                 </div>
                 <div class="kpi-card">
                     <div class="kpi-icon">✅</div>
                     <div class="kpi-label">Tasa de Asistencia</div>
-                    <div class="kpi-value">89%</div>
-                    <div class="kpi-trend up">▲ 3% vs mes anterior</div>
+                    <div class="kpi-value">{{ summary.attendance_rate }}%</div>
                 </div>
             </div>
 
+            <!-- Event table -->
             <div class="section-header">
                 <div class="section-title">Gestión de Eventos</div>
                 <div class="section-actions">
-                    <input class="search-mini" type="text" placeholder="Buscar evento...">
-                    <button class="filter-btn">⚙ Filtros</button>
+                    <input class="search-mini" type="text" v-model="search" placeholder="Buscar evento...">
                 </div>
             </div>
 
-            <table class="data-table">
+            <div v-if="loading" style="text-align:center;padding:40px;font-family:'DM Mono',monospace;color:var(--gris);">Cargando...</div>
+
+            <table v-else class="data-table">
                 <thead>
                     <tr>
-                        <th class="sortable">Evento ↕</th>
-                        <th class="sortable">Fecha ↕</th>
+                        <th>Evento</th>
+                        <th>Fecha</th>
                         <th>Lugar</th>
-                        <th class="sortable">Vendidos ↕</th>
+                        <th>Vendidos</th>
                         <th>Ocupación</th>
-                        <th class="sortable">Ingresos ↕</th>
+                        <th>Ingresos</th>
                         <th>Estado</th>
                         <th>Acciones</th>
                     </tr>
                 </thead>
                 <tbody>
-                    <tr>
+                    <tr v-for="(ev, idx) in filteredEvents" :key="ev.id">
                         <td>
                             <div class="event-name-cell">
-                                <div class="event-thumb" style="background: rgba(139,26,26,0.2);">🐎</div>
+                                <div class="event-thumb" style="background: rgba(139,26,26,0.2);">{{ icons[idx % icons.length] }}</div>
                                 <div>
-                                    <div style="font-weight: bold; color: var(--crema);">Gran Campeonato Nacional</div>
-                                    <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--gris);">Charreada Completa</div>
+                                    <div style="font-weight: bold; color: var(--crema);">{{ ev.name }}</div>
+                                    <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--gris);">{{ ev.venue }}</div>
                                 </div>
                             </div>
                         </td>
                         <td>
-                            <div>15 Mar 2025</div>
-                            <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--gris);">10:00 AM</div>
+                            <div>{{ fmtDate(ev.starts_at) }}</div>
+                            <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--gris);">{{ fmtTime(ev.starts_at) }}</div>
                         </td>
-                        <td>Guadalajara, Jal.</td>
-                        <td><b>847</b></td>
+                        <td>{{ ev.city }}</td>
+                        <td><b>{{ totalSold(ev).toLocaleString() }}</b></td>
                         <td>
                             <div class="progress-mini">
                                 <div class="progress-mini-bar">
-                                    <div class="progress-mini-fill" style="width:70.6%"></div>
+                                    <div class="progress-mini-fill" :style="{ width: occupancy(ev) + '%' }"></div>
                                 </div>
-                                <div class="progress-mini-text">847 / 1,200 — 70.6%</div>
+                                <div class="progress-mini-text">{{ totalSold(ev).toLocaleString() }} / {{ totalCap(ev).toLocaleString() }} — {{ occupancy(ev) }}%</div>
                             </div>
                         </td>
-                        <td style="font-family:'Playfair Display',serif;color:var(--dorado-claro);">$423,500</td>
-                        <td><span class="status-pill active">Activo</span></td>
+                        <td style="font-family:'Playfair Display',serif;color:var(--dorado-claro);">{{ currency(totalRevenue(ev)) }}</td>
+                        <td><span :class="'status-pill ' + statusClass(ev.status)">{{ statusLabel(ev.status) }}</span></td>
                         <td>
                             <div class="table-actions">
-                                <button class="action-btn">✏ Editar</button><button class="action-btn">👁 Ver</button><button
-                                    class="action-btn danger">🗑</button>
+                                <button class="action-btn" @click="openEdit(ev)">✏ Editar</button>
+                                <button v-if="ev.status === 'draft'" class="action-btn" @click="publishEvent(ev)">📢 Publicar</button>
+                                <button v-if="ev.status === 'published'" class="action-btn" @click="cancelEvent(ev)">⛔ Cancelar</button>
+                                <button class="action-btn danger" @click="deleteEvent(ev)">🗑</button>
                             </div>
                         </td>
                     </tr>
-                    <tr>
-                        <td>
-                            <div class="event-name-cell">
-                                <div class="event-thumb" style="background: rgba(26,74,46,0.2);">🤠</div>
-                                <div>
-                                    <div style="font-weight: bold; color: var(--crema);">Torneo Estatal Escaramuzas</div>
-                                    <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--gris);">Escaramuzas Charras</div>
-                                </div>
-                            </div>
-                        </td>
-                        <td>
-                            <div>22 Mar 2025</div>
-                            <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--gris);">12:00 PM</div>
-                        </td>
-                        <td>CDMX</td>
-                        <td><b>342</b></td>
-                        <td>
-                            <div class="progress-mini">
-                                <div class="progress-mini-bar">
-                                    <div class="progress-mini-fill" style="width:42.75%"></div>
-                                </div>
-                                <div class="progress-mini-text">342 / 800 — 42.8%</div>
-                            </div>
-                        </td>
-                        <td style="font-family:'Playfair Display',serif;color:var(--dorado-claro);">$68,400</td>
-                        <td><span class="status-pill upcoming">Próximo</span></td>
-                        <td>
-                            <div class="table-actions">
-                                <button class="action-btn">✏ Editar</button><button class="action-btn">👁 Ver</button><button
-                                    class="action-btn danger">🗑</button>
-                            </div>
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>
-                            <div class="event-name-cell">
-                                <div class="event-thumb" style="background: rgba(61,32,8,0.4);">🏟️</div>
-                                <div>
-                                    <div style="font-weight: bold; color: var(--crema);">Lienzo Charro Internacional</div>
-                                    <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--gris);">Internacional</div>
-                                </div>
-                            </div>
-                        </td>
-                        <td>
-                            <div>05 Abr 2025</div>
-                            <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--gris);">11:00 AM</div>
-                        </td>
-                        <td>Querétaro, Qro.</td>
-                        <td><b>1,200</b></td>
-                        <td>
-                            <div class="progress-mini">
-                                <div class="progress-mini-bar">
-                                    <div class="progress-mini-fill" style="width:100%"></div>
-                                </div>
-                                <div class="progress-mini-text">1,200 / 1,200 — 100%</div>
-                            </div>
-                        </td>
-                        <td style="font-family:'Playfair Display',serif;color:var(--dorado-claro);">$576,000</td>
-                        <td><span class="status-pill sold">Agotado</span></td>
-                        <td>
-                            <div class="table-actions">
-                                <button class="action-btn">✏ Editar</button><button class="action-btn">👁 Ver</button><button
-                                    class="action-btn danger">🗑</button>
-                            </div>
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>
-                            <div class="event-name-cell">
-                                <div class="event-thumb" style="background: rgba(61,32,8,0.2);">🎪</div>
-                                <div>
-                                    <div style="font-weight: bold; color: var(--crema);">Fiesta Charra de Mayo</div>
-                                    <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--gris);">Festival</div>
-                                </div>
-                            </div>
-                        </td>
-                        <td>
-                            <div>03 May 2025</div>
-                            <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--gris);">10:00 AM</div>
-                        </td>
-                        <td>Guadalajara, Jal.</td>
-                        <td><b>0</b></td>
-                        <td>
-                            <div class="progress-mini">
-                                <div class="progress-mini-bar">
-                                    <div class="progress-mini-fill" style="width:0%"></div>
-                                </div>
-                                <div class="progress-mini-text">0 / 900 — 0%</div>
-                            </div>
-                        </td>
-                        <td style="font-family:'Playfair Display',serif;color:var(--dorado-claro);">$0</td>
-                        <td><span class="status-pill draft">Borrador</span></td>
-                        <td>
-                            <div class="table-actions">
-                                <button class="action-btn">✏ Editar</button><button class="action-btn">👁 Ver</button><button
-                                    class="action-btn danger">🗑</button>
-                            </div>
-                        </td>
+                    <tr v-if="filteredEvents.length === 0">
+                        <td colspan="8" style="text-align:center;padding:30px;font-family:'DM Mono',monospace;color:var(--gris);">No hay eventos.</td>
                     </tr>
                 </tbody>
             </table>
+        </div>
+    </div>
 
-            <div class="bottom-grid">
-                <div class="widget">
-                    <div class="widget-title">Ventas Recientes</div>
-                    <div class="recent-sale">
-                        <div class="sale-avatar">🤠</div>
-                        <div class="sale-info">
-                            <div class="sale-name">Carlos Mendoza</div>
-                            <div class="sale-meta">2× Palco VIP · Campeonato Nacional</div>
-                        </div>
-                        <div class="sale-amount">$1,700</div>
+    <!-- Modal Crear/Editar -->
+    <div v-if="showForm" style="position:fixed;inset:0;background:rgba(0,0,0,0.8);display:flex;align-items:center;justify-content:center;z-index:100;">
+        <div style="background:#1A0800;border:1px solid rgba(200,146,42,0.3);padding:32px;max-width:600px;width:90%;max-height:90vh;overflow-y:auto;">
+            <div style="font-family:'Playfair Display',serif;font-size:22px;color:var(--dorado-claro);margin-bottom:20px;">{{ editingEvent ? 'Editar Evento' : 'Nuevo Evento' }}</div>
+            <div style="display:grid;gap:12px;">
+                <input v-model="form.name" placeholder="Nombre del evento" style="background:rgba(0,0,0,0.5);border:1px solid rgba(200,146,42,0.3);padding:10px 14px;color:var(--crema);font-family:'DM Mono',monospace;font-size:12px;outline:none;">
+                <textarea v-model="form.description" placeholder="Descripción" rows="2" style="background:rgba(0,0,0,0.5);border:1px solid rgba(200,146,42,0.3);padding:10px 14px;color:var(--crema);font-family:'DM Mono',monospace;font-size:12px;outline:none;resize:vertical;"></textarea>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                    <input v-model="form.city" placeholder="Ciudad" style="background:rgba(0,0,0,0.5);border:1px solid rgba(200,146,42,0.3);padding:10px 14px;color:var(--crema);font-family:'DM Mono',monospace;font-size:12px;outline:none;">
+                    <input v-model="form.venue" placeholder="Lugar/Venue" style="background:rgba(0,0,0,0.5);border:1px solid rgba(200,146,42,0.3);padding:10px 14px;color:var(--crema);font-family:'DM Mono',monospace;font-size:12px;outline:none;">
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                    <div>
+                        <label style="font-family:'DM Mono',monospace;font-size:9px;color:var(--gris);letter-spacing:1px;">INICIO</label>
+                        <input v-model="form.starts_at" type="datetime-local" style="background:rgba(0,0,0,0.5);border:1px solid rgba(200,146,42,0.3);padding:10px 14px;color:var(--crema);font-family:'DM Mono',monospace;font-size:12px;outline:none;width:100%;">
                     </div>
-                    <div class="recent-sale">
-                        <div class="sale-avatar">👩</div>
-                        <div class="sale-info">
-                            <div class="sale-name">Ana González</div>
-                            <div class="sale-meta">4× General · Torneo Escaramuzas</div>
-                        </div>
-                        <div class="sale-amount">$800</div>
-                    </div>
-                    <div class="recent-sale">
-                        <div class="sale-avatar">👨</div>
-                        <div class="sale-info">
-                            <div class="sale-name">Roberto Hernández</div>
-                            <div class="sale-meta">1× Gradería Premium · Campeonato</div>
-                        </div>
-                        <div class="sale-amount">$500</div>
-                    </div>
-                    <div class="recent-sale">
-                        <div class="sale-avatar">👴</div>
-                        <div class="sale-info">
-                            <div class="sale-name">José Morales Cruz</div>
-                            <div class="sale-meta">3× General + 2× Niños · Campeonato</div>
-                        </div>
-                        <div class="sale-amount">$1,350</div>
+                    <div>
+                        <label style="font-family:'DM Mono',monospace;font-size:9px;color:var(--gris);letter-spacing:1px;">FIN (OPCIONAL)</label>
+                        <input v-model="form.ends_at" type="datetime-local" style="background:rgba(0,0,0,0.5);border:1px solid rgba(200,146,42,0.3);padding:10px 14px;color:var(--crema);font-family:'DM Mono',monospace;font-size:12px;outline:none;width:100%;">
                     </div>
                 </div>
-
-                <div class="widget">
-                    <div class="widget-title">Alertas del Sistema</div>
-                    <div class="alert-item warning">
-                        <div class="alert-icon">⚠️</div>
-                        <div>
-                            <div class="alert-text">Torneo Escaramuzas tiene menos del 50% de ocupación — considera una promoción.</div>
-                            <div class="alert-meta">hace 2 horas</div>
-                        </div>
-                    </div>
-                    <div class="alert-item info">
-                        <div class="alert-icon">ℹ️</div>
-                        <div>
-                            <div class="alert-text">Lienzo Charro Internacional — se detectaron 3 intentos de uso de tickets duplicados.</div>
-                            <div class="alert-meta">hace 4 horas</div>
-                        </div>
-                    </div>
-                    <div class="alert-item info">
-                        <div class="alert-icon">📧</div>
-                        <div>
-                            <div class="alert-text">847 correos de confirmación enviados exitosamente hoy.</div>
-                            <div class="alert-meta">hace 6 horas</div>
-                        </div>
-                    </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                    <select v-model="form.barcode_format" style="background:rgba(0,0,0,0.5);border:1px solid rgba(200,146,42,0.3);padding:10px 14px;color:var(--crema);font-family:'DM Mono',monospace;font-size:12px;outline:none;">
+                        <option value="qr">QR Code</option>
+                        <option value="code128">Code 128</option>
+                    </select>
+                    <select v-model="form.status" style="background:rgba(0,0,0,0.5);border:1px solid rgba(200,146,42,0.3);padding:10px 14px;color:var(--crema);font-family:'DM Mono',monospace;font-size:12px;outline:none;">
+                        <option value="draft">Borrador</option>
+                        <option value="published">Publicado</option>
+                    </select>
                 </div>
+
+                <div style="font-family:'DM Mono',monospace;font-size:10px;letter-spacing:2px;color:var(--dorado);margin-top:8px;">ZONAS</div>
+                <div v-for="(z, zi) in form.zones" :key="zi" style="display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:8px;align-items:center;">
+                    <input v-model="z.name" placeholder="Nombre zona" style="background:rgba(0,0,0,0.5);border:1px solid rgba(200,146,42,0.3);padding:8px 12px;color:var(--crema);font-family:'DM Mono',monospace;font-size:12px;outline:none;">
+                    <input v-model="z.capacity" type="number" placeholder="Capacidad" style="background:rgba(0,0,0,0.5);border:1px solid rgba(200,146,42,0.3);padding:8px 12px;color:var(--crema);font-family:'DM Mono',monospace;font-size:12px;outline:none;">
+                    <input v-model="z.price" type="number" placeholder="Precio" style="background:rgba(0,0,0,0.5);border:1px solid rgba(200,146,42,0.3);padding:8px 12px;color:var(--crema);font-family:'DM Mono',monospace;font-size:12px;outline:none;">
+                    <button v-if="form.zones.length > 1" @click="removeZone(zi)" style="background:none;border:1px solid rgba(244,67,54,0.4);color:#F44336;padding:6px 10px;cursor:pointer;font-size:12px;">✕</button>
+                </div>
+                <button @click="addZone" style="background:none;border:1px dashed rgba(200,146,42,0.3);padding:8px;color:var(--gris);font-family:'DM Mono',monospace;font-size:11px;cursor:pointer;">+ Agregar zona</button>
+            </div>
+            <div style="display:flex;gap:10px;margin-top:20px;justify-content:flex-end;">
+                <button @click="showForm = false" class="btn-outline">Cancelar</button>
+                <button @click="saveEvent" class="btn-primary">{{ editingEvent ? 'Guardar Cambios' : 'Crear Evento' }}</button>
             </div>
         </div>
     </div>
@@ -347,7 +366,7 @@ body { font-family: 'Libre Baskerville', serif; background: var(--cafe); color: 
 .btn-primary:hover { background: #A02020; }
 .btn-outline { background: none; border: 1.5px solid var(--dorado); padding: 10px 20px; color: var(--dorado); font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 2px; cursor: pointer; text-transform: uppercase; transition: all 0.2s; }
 .btn-outline:hover { background: var(--dorado); color: var(--cafe); }
-.kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 28px; }
+.kpi-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 28px; }
 .kpi-card {
   background: #1A0800; border: 1px solid rgba(200,146,42,0.2);
   padding: 22px; position: relative; overflow: hidden; cursor: pointer;
