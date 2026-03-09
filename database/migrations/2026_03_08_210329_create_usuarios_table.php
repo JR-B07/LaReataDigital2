@@ -15,6 +15,7 @@ return new class extends Migration
             $table->string('password');
             $table->string('telefono')->nullable();
             $table->enum('rol',['administrador','vendedor','checador','promotor','superadministrador']);
+            $table->boolean('activo')->default(false);
             $table->timestamps();
         });
 Schema::create('password_reset_tokens', function (Blueprint $table) {
