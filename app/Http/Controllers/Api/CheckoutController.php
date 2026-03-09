@@ -69,11 +69,12 @@ class CheckoutController extends Controller
         $total = max(0, $subtotal - $discountTotal);
 
         $order = DB::transaction(function () use ($data, $event, $zone, $subtotal, $discountTotal, $total, $discount) {
+            // Guest checkout: keep order buyer data without requiring individual user profiles.
             $buyer = User::query()->firstOrCreate(
-                ['email' => $data['buyer_email']],
+                ['email' => 'invitado@lareata.local'],
                 [
-                    'name' => $data['buyer_name'],
-                    'phone' => $data['buyer_phone'] ?? null,
+                    'name' => 'Comprador Invitado',
+                    'phone' => null,
                     'password' => Str::password(16),
                     'role' => 'buyer',
                 ]

@@ -1,33 +1,83 @@
 <script setup>
-import { computed, ref } from 'vue';
+import { computed, ref, onMounted } from 'vue';
 
-const mockTickets = ref({
-    'CHT-2025-03-15-00001': { name: 'Luis Ramírez', zone: 'PALCO VIP · A-01', status: 'valid' },
-    'CHT-2025-03-15-00002': { name: 'Elena Castro', zone: 'GENERAL · Norte', status: 'used' },
-    'CHT-2025-03-15-00003': { name: 'Pedro Morales', zone: 'GRADERÍA PREMIUM · D-05', status: 'valid' },
-});
+const token = ref(localStorage.getItem('auth_token') || '');
+const user = ref(null);
+const loginName = ref('');
+const loginPass = ref('');
+const loginError = ref('');
+const loggingIn = ref(false);
 
 const manualCode = ref('');
-const countValid = ref(847);
-const countPending = ref(353);
-const countInvalid = ref(12);
-const sessionCount = ref(5);
-
+const countValid = ref(0);
+const countUsed = ref(0);
+const countInvalid = ref(0);
+const sessionCount = ref(0);
 const resultType = ref('hidden');
 const resultEmoji = ref('');
 const resultText = ref('');
 const scanHint = ref('Cámara lista · Esperando código');
+const logs = ref([]);
 
-const logs = ref([
-    { type: 'valid', icon: '✓', name: 'Carlos Mendoza Rivas', code: 'CHT-2025-03-15-00847', detail: 'PALCO VIP · Asiento A-07', badge: 'VÁLIDO', time: 'hace 2 min' },
-    { type: 'used', icon: '!', name: 'Ana González Pérez', code: 'CHT-2025-03-15-00631', detail: 'GENERAL · Zona Norte', badge: 'YA UTILIZADO', time: 'hace 8 min' },
-    { type: 'invalid', icon: '✕', name: 'Código desconocido', code: 'XXX-0000-00-00-00000', detail: 'No encontrado en el sistema', badge: 'NO VÁLIDO', time: 'hace 15 min' },
-    { type: 'valid', icon: '✓', name: 'Roberto Hernández Cruz', code: 'CHT-2025-03-15-00844', detail: 'GRADERÍA PREMIUM · Fila E-12', badge: 'VÁLIDO', time: 'hace 18 min' },
-    { type: 'valid', icon: '✓', name: 'María Torres Salinas', code: 'CHT-2025-03-15-00840', detail: 'PALCO VIP · Asiento B-03', badge: 'VÁLIDO', time: 'hace 22 min' },
-]);
+const ax = () => {
+    const instance = window.axios.create();
+    if (token.value) instance.defaults.headers.common['Authorization'] = `Bearer ${token.value}`;
+    return instance;
+};
 
-const progressFill = computed(() => `${(countValid.value / 1200) * 100}%`);
-const progressText = computed(() => `${countValid.value} / 1,200`);
+const doLogin = async () => {
+    loggingIn.value = true;
+    loginError.value = '';
+    try {
+        const { data } = await window.axios.post('/api/auth/login', {
+            login: loginName.value,
+            password: loginPass.value,
+        });
+        token.value = data.token;
+        user.value = data.user;
+        localStorage.setItem('auth_token', data.token);
+
+        if (['seller', 'admin'].includes(data.user?.role)) {
+            window.location.href = '/vendedor';
+            return;
+        }
+    } catch (e) {
+        loginError.value = e.response?.data?.message || 'Credenciales inválidas.';
+    } finally {
+        loggingIn.value = false;
+    }
+};
+
+const doLogout = async () => {
+    try {
+        if (token.value) await ax().post('/api/auth/logout');
+    } catch {
+        // Ignore logout API errors and continue local cleanup.
+    }
+
+    token.value = '';
+    user.value = null;
+    localStorage.removeItem('auth_token');
+    window.location.href = '/';
+};
+
+onMounted(async () => {
+    if (token.value) {
+        try {
+            const { data } = await ax().get('/api/auth/me');
+            if (['seller', 'admin'].includes(data?.role)) {
+                window.location.href = '/vendedor';
+                return;
+            }
+
+            user.value = data;
+        } catch {
+            doLogout();
+        }
+    }
+});
+
+const progressFill = computed(() => `${Math.min(100, (countValid.value / Math.max(1, countValid.value + countUsed.value + countInvalid.value)) * 100)}%`);
 const logCountText = computed(() => `${sessionCount.value} en esta sesión`);
 
 const resetResult = () => {
@@ -43,54 +93,34 @@ const showResult = (type, name, code, detail, badge) => {
         used: { emoji: '⚠️', text: 'Ya Utilizado', icon: '!' },
         invalid: { emoji: '❌', text: 'Ticket No Válido', icon: '✕' },
     };
-
     resultType.value = type;
     resultEmoji.value = mapping[type].emoji;
     resultText.value = mapping[type].text;
     scanHint.value = mapping[type].text;
-
     sessionCount.value++;
-    logs.value.unshift({
-        type,
-        icon: mapping[type].icon,
-        name,
-        code,
-        detail,
-        badge,
-        time: 'ahora',
-    });
-
-    setTimeout(() => {
-        resetResult();
-    }, 2500);
+    logs.value.unshift({ type, icon: mapping[type].icon, name, code, detail, badge, time: 'ahora' });
+    setTimeout(resetResult, 2500);
 };
 
-const validateManual = () => {
-    const code = manualCode.value.trim().toUpperCase();
-    if (!code) {
-        return;
-    }
-
-    const ticket = mockTickets.value[code];
-
-    if (!ticket) {
-        countInvalid.value++;
-        showResult('invalid', 'Código desconocido', code, 'No encontrado en el sistema', 'NO VÁLIDO');
-        manualCode.value = '';
-        return;
-    }
-
-    if (ticket.status === 'used') {
-        showResult('used', ticket.name, code, ticket.zone, 'YA UTILIZADO');
-        manualCode.value = '';
-        return;
-    }
-
-    ticket.status = 'used';
-    countValid.value++;
-    countPending.value = Math.max(0, countPending.value - 1);
-    showResult('valid', ticket.name, code, ticket.zone, 'VÁLIDO');
+const validateManual = async () => {
+    const code = manualCode.value.trim();
+    if (!code) return;
     manualCode.value = '';
+
+    try {
+        const { data } = await ax().post('/api/validator/scan', { ticket_code: code });
+        countValid.value++;
+        showResult('valid', data.ticket?.event || 'Ticket', code, data.ticket?.zone || '', 'VÁLIDO');
+    } catch (e) {
+        const result = e.response?.data?.result || 'invalid';
+        if (result === 'used') {
+            countUsed.value++;
+            showResult('used', 'Boleto', code, e.response?.data?.message || 'Ya utilizado', 'YA UTILIZADO');
+        } else {
+            countInvalid.value++;
+            showResult('invalid', 'Código desconocido', code, e.response?.data?.message || 'No válido', 'NO VÁLIDO');
+        }
+    }
 };
 </script>
 
@@ -98,95 +128,115 @@ const validateManual = () => {
     <nav class="topbar">
         <a href="/" class="topbar-brand">Chárro<span>Tickets</span></a>
         <div class="topbar-nav">
-            <a href="/">Inicio</a>
-            <a href="/compra">Comprar</a>
-            <a href="/validador" class="active">Validador</a>
-            <a href="/admin">Admin</a>
-            <a href="/reportes">Reportes</a>
+            <a v-if="token" href="#" class="active" @click.prevent="doLogout">Cerrar Sesion</a>
+            <a v-else href="/">Inicio</a>
         </div>
     </nav>
-    <div class="page-label">Vista 3 / 5 — Validador de Entrada</div>
+    <div class="page-label">Validador de Entrada</div>
 
-    <div class="event-header">
-        <div class="event-header-info">
-            <div class="event-header-name">Gran Campeonato Nacional de Charreada 2025</div>
-            <div class="event-header-meta">SAB 15 MAR 2025 · 10:00 AM · PUERTA PRINCIPAL · OPERADOR: Juan Reyes</div>
-        </div>
-        <div class="live-badge"><div class="live-dot"></div>EN VIVO</div>
-    </div>
-
-    <div class="validator-layout">
-        <div class="scanner-panel">
-            <div class="scanner-title">Validador de Acceso</div>
-            <div class="scanner-sub">Apunta al código de barras del boleto</div>
-
-            <div class="scanner-box">
-                <div class="scanner-corner tl"></div>
-                <div class="scanner-corner tr"></div>
-                <div class="scanner-corner bl"></div>
-                <div class="scanner-corner br"></div>
-                <div class="scan-line" v-if="resultType === 'hidden'"></div>
-                <div class="scan-icon">📷</div>
-                <div v-if="resultType !== 'hidden'" :class="`result-overlay ${resultType}`">
-                    {{ resultEmoji }}
-                    <div style="font-family:'DM Mono',monospace;font-size:14px;letter-spacing:2px;margin-top:8px;color:var(--crema);">
-                        {{ resultText }}
-                    </div>
-                </div>
-            </div>
-
-            <div class="scan-hint">{{ scanHint }}</div>
-
-            <div class="or-divider">— o ingresa manualmente —</div>
-
-            <div class="manual-input">
-                <input v-model="manualCode" type="text" placeholder="CHT-2025-03-15-XXXXX" maxlength="22" @keyup.enter="validateManual">
-                <button @click="validateManual">Validar</button>
-            </div>
-
-            <div class="progress-stats">
-                <div style="font-family:'DM Mono',monospace; font-size:10px; letter-spacing:2px; color:var(--dorado); text-transform:uppercase; margin-bottom:12px;">Progreso del Evento</div>
-                <div class="progress-label">
-                    <span>Asistencia</span>
-                    <span>{{ progressText }}</span>
-                </div>
-                <div class="progress-bar"><div class="progress-fill" :style="{ width: progressFill }"></div></div>
-                <div class="mini-stats">
-                    <div class="mini-stat">
-                        <div class="mini-stat-val" style="color: var(--dorado-claro);">{{ countValid }}</div>
-                        <div class="mini-stat-label">Ingresados</div>
-                    </div>
-                    <div class="mini-stat">
-                        <div class="mini-stat-val" style="color: #42A5F5;">{{ countPending }}</div>
-                        <div class="mini-stat-label">Pendientes</div>
-                    </div>
-                    <div class="mini-stat">
-                        <div class="mini-stat-val" style="color: #F44336;">{{ countInvalid }}</div>
-                        <div class="mini-stat-label">Rechazados</div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="log-panel">
-            <div class="log-header">
-                <div class="log-title">Historial de Escaneos</div>
-                <div class="log-count">{{ logCountText }}</div>
-            </div>
-            <div class="log-list">
-                <div v-for="(entry, index) in logs" :key="`${entry.code}-${index}`" class="log-entry">
-                    <div :class="`log-status ${entry.type}`">{{ entry.icon }}</div>
-                    <div class="log-info">
-                        <div class="log-name">{{ entry.name }}</div>
-                        <div class="log-code">{{ entry.code }}</div>
-                        <div class="log-detail">{{ entry.detail }}</div>
-                        <span :class="`log-badge ${entry.type}`">{{ entry.badge }}</span>
-                    </div>
-                    <div class="log-time">{{ entry.time }}</div>
-                </div>
-            </div>
+    <!-- Login -->
+    <div v-if="!token" style="padding:80px 40px;text-align:center;">
+        <div style="font-size:64px;margin-bottom:16px;">🔐</div>
+        <div class="section-title" style="margin-bottom:8px;font-family:'Playfair Display',serif;font-size:24px;color:var(--dorado-claro);">Acceso de Validador</div>
+        <div style="font-family:'DM Mono',monospace;font-size:11px;color:var(--gris);margin-bottom:24px;">Inicia sesión con tu cuenta de validador</div>
+        <div style="max-width:350px;margin:0 auto;display:flex;flex-direction:column;gap:12px;">
+            <input v-model="loginName" type="text" placeholder="Usuario o correo" @keyup.enter="doLogin"
+                style="background:rgba(0,0,0,0.5);border:1px solid rgba(200,146,42,0.3);padding:12px 16px;color:var(--crema);font-family:'DM Mono',monospace;font-size:12px;outline:none;">
+            <input v-model="loginPass" type="password" placeholder="Contraseña" @keyup.enter="doLogin"
+                style="background:rgba(0,0,0,0.5);border:1px solid rgba(200,146,42,0.3);padding:12px 16px;color:var(--crema);font-family:'DM Mono',monospace;font-size:12px;outline:none;">
+            <div v-if="loginError" style="color:#F44336;font-family:'DM Mono',monospace;font-size:11px;">{{ loginError }}</div>
+            <button @click="doLogin" :disabled="loggingIn" style="background:var(--rojo);border:none;padding:14px;color:var(--crema);font-family:'DM Mono',monospace;font-size:12px;letter-spacing:2px;cursor:pointer;">
+                {{ loggingIn ? 'INICIANDO...' : 'INICIAR SESIÓN' }}
+            </button>
         </div>
     </div>
+
+    <!-- Validador -->
+    <template v-else>
+        <div class="event-header">
+            <div class="event-header-info">
+                <div class="event-header-name">Validador ChárroTickets</div>
+                <div class="event-header-meta">OPERADOR: {{ user?.name || '...' }} · {{ user?.role?.toUpperCase() }}</div>
+            </div>
+            <div class="live-badge"><div class="live-dot"></div>EN VIVO</div>
+        </div>
+
+        <div class="validator-layout">
+            <div class="scanner-panel">
+                <div class="scanner-title">Validador de Acceso</div>
+                <div class="scanner-sub">Apunta al código de barras del boleto</div>
+
+                <div class="scanner-box">
+                    <div class="scanner-corner tl"></div>
+                    <div class="scanner-corner tr"></div>
+                    <div class="scanner-corner bl"></div>
+                    <div class="scanner-corner br"></div>
+                    <div class="scan-line" v-if="resultType === 'hidden'"></div>
+                    <div class="scan-icon">📷</div>
+                    <div v-if="resultType !== 'hidden'" :class="`result-overlay ${resultType}`">
+                        {{ resultEmoji }}
+                        <div style="font-family:'DM Mono',monospace;font-size:14px;letter-spacing:2px;margin-top:8px;color:var(--crema);">
+                            {{ resultText }}
+                        </div>
+                    </div>
+                </div>
+
+                <div class="scan-hint">{{ scanHint }}</div>
+
+                <div class="or-divider">— o ingresa manualmente —</div>
+
+                <div class="manual-input">
+                    <input v-model="manualCode" type="text" placeholder="CÓDIGO DE TICKET" @keyup.enter="validateManual">
+                    <button @click="validateManual">Validar</button>
+                </div>
+
+                <div class="progress-stats">
+                    <div style="font-family:'DM Mono',monospace; font-size:10px; letter-spacing:2px; color:var(--dorado); text-transform:uppercase; margin-bottom:12px;">Estadísticas de Sesión</div>
+                    <div class="progress-label">
+                        <span>Escaneos</span>
+                        <span>{{ sessionCount }} total</span>
+                    </div>
+                    <div class="progress-bar"><div class="progress-fill" :style="{ width: progressFill }"></div></div>
+                    <div class="mini-stats">
+                        <div class="mini-stat">
+                            <div class="mini-stat-val" style="color: var(--dorado-claro);">{{ countValid }}</div>
+                            <div class="mini-stat-label">Válidos</div>
+                        </div>
+                        <div class="mini-stat">
+                            <div class="mini-stat-val" style="color: #FF9800;">{{ countUsed }}</div>
+                            <div class="mini-stat-label">Usados</div>
+                        </div>
+                        <div class="mini-stat">
+                            <div class="mini-stat-val" style="color: #F44336;">{{ countInvalid }}</div>
+                            <div class="mini-stat-label">Rechazados</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="log-panel">
+                <div class="log-header">
+                    <div class="log-title">Historial de Escaneos</div>
+                    <div class="log-count">{{ logCountText }}</div>
+                </div>
+                <div class="log-list">
+                    <div v-if="logs.length === 0" style="text-align:center;padding:40px;font-family:'DM Mono',monospace;font-size:11px;color:var(--gris);">
+                        Aún no hay escaneos en esta sesión.
+                    </div>
+                    <div v-for="(entry, index) in logs" :key="`${entry.code}-${index}`" class="log-entry">
+                        <div :class="`log-status ${entry.type}`">{{ entry.icon }}</div>
+                        <div class="log-info">
+                            <div class="log-name">{{ entry.name }}</div>
+                            <div class="log-code">{{ entry.code }}</div>
+                            <div class="log-detail">{{ entry.detail }}</div>
+                            <span :class="`log-badge ${entry.type}`">{{ entry.badge }}</span>
+                        </div>
+                        <div class="log-time">{{ entry.time }}</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </template>
 </template>
 
 <style>

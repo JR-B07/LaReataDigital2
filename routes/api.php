@@ -48,4 +48,19 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/reports/summary', [ReportController::class, 'summary']);
         Route::get('/reports/sales-by-zone', [ReportController::class, 'salesByZone']);
     });
+
+    Route::prefix('seller')->middleware('role:seller,admin')->group(function () {
+        Route::get('/events', [AdminEventController::class, 'index']);
+        Route::post('/events', [AdminEventController::class, 'store']);
+        Route::get('/events/{event}', [AdminEventController::class, 'show']);
+        Route::put('/events/{event}', [AdminEventController::class, 'update']);
+        Route::delete('/events/{event}', [AdminEventController::class, 'destroy']);
+        Route::post('/events/{event}/publish', [AdminEventController::class, 'publish']);
+        Route::post('/events/{event}/cancel', [AdminEventController::class, 'cancel']);
+        Route::post('/events/{event}/validators', [AdminEventController::class, 'assignValidator']);
+        Route::delete('/events/{event}/validators', [AdminEventController::class, 'unassignValidator']);
+
+        Route::get('/reports/summary', [ReportController::class, 'summary']);
+        Route::get('/reports/sales-by-zone', [ReportController::class, 'salesByZone']);
+    });
 });

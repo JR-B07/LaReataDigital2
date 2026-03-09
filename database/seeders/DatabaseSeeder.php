@@ -35,6 +35,15 @@ class DatabaseSeeder extends Seeder
         ]);
 
         User::query()->updateOrCreate([
+            'email' => 'vendedor@lareata.test',
+        ], [
+            'name' => 'Vendedor Demo',
+            'phone' => '5544444444',
+            'role' => 'seller',
+            'password' => Hash::make('password123'),
+        ]);
+
+        User::query()->updateOrCreate([
             'email' => 'comprador@lareata.test',
         ], [
             'name' => 'Comprador Demo',
