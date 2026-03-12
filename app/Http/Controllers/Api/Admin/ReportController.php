@@ -3,9 +3,6 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
-use App\Models\Order;
-use App\Models\Ticket;
-use App\Models\TicketScan;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -16,65 +13,84 @@ class ReportController extends Controller
     {
         $eventId = $request->query('event_id');
 
-        $orders = Order::query();
-        $tickets = Ticket::query();
-        $scans = TicketScan::query();
+        $tickets = DB::table('boletos');
 
         if ($eventId) {
-            $orders->where('event_id', $eventId);
-            $tickets->where('event_id', $eventId);
-            $scans->where('event_id', $eventId);
+            $tickets->where('id_evento', $eventId);
         }
 
-        $soldTickets = (int) $tickets->count();
-        $usedTickets = (int) $tickets->where('status', 'used')->count();
+        $soldTickets = (int) (clone $tickets)->whereIn('estado', ['vendido', 'usado'])->count();
+        $usedTickets = (int) (clone $tickets)->where('estado', 'usado')->count();
+
+        $orderBase = DB::table('ventas');
+
+        if ($eventId) {
+            $orderBase
+                ->join('venta_detalle', 'venta_detalle.id_venta', '=', 'ventas.id')
+                ->join('boletos', 'boletos.id', '=', 'venta_detalle.id_boleto')
+                ->where('boletos.id_evento', $eventId);
+        }
+
+        $ordersCount = (int) (clone $orderBase)->distinct('ventas.id')->count('ventas.id');
+        $revenueTotal = (float) (clone $orderBase)->sum('ventas.total');
 
         return response()->json([
-            'orders_count' => (int) $orders->count(),
+            'orders_count' => $ordersCount,
             'tickets_sold' => $soldTickets,
-            'revenue_total' => (float) $orders->sum('total'),
+            'revenue_total' => $revenueTotal,
             'attendance_rate' => $soldTickets > 0 ? round(($usedTickets / $soldTickets) * 100, 2) : 0,
-            'fraud_attempts' => (int) $scans->whereIn('result', ['invalid', 'used'])->count(),
+            'fraud_attempts' => 0,
         ]);
     }
 
     public function salesByZone(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'event_id' => ['required', 'exists:events,id'],
+            'event_id' => ['required', 'exists:eventos,id'],
         ]);
 
-        $salesSubquery = DB::table('order_items')
-            ->join('orders', 'orders.id', '=', 'order_items.order_id')
-            ->where('orders.event_id', $data['event_id'])
-            ->groupBy('order_items.event_zone_id')
-            ->selectRaw('order_items.event_zone_id, SUM(order_items.quantity) as tickets, SUM(order_items.subtotal) as amount');
+        $event = DB::table('eventos')->where('id', $data['event_id'])->first();
 
-        $attendanceSubquery = DB::table('tickets')
-            ->where('tickets.event_id', $data['event_id'])
-            ->groupBy('tickets.event_zone_id')
-            ->selectRaw("tickets.event_zone_id, COUNT(*) as sold_tickets, SUM(CASE WHEN tickets.status = 'used' THEN 1 ELSE 0 END) as assisted");
+        if (! $event) {
+            return response()->json([]);
+        }
 
-        $rows = DB::table('event_zones')
-            ->where('event_zones.event_id', $data['event_id'])
-            ->leftJoinSub($salesSubquery, 'sales', function ($join) {
-                $join->on('sales.event_zone_id', '=', 'event_zones.id');
+        $soldSubquery = DB::table('boletos')
+            ->join('asientos', 'asientos.id', '=', 'boletos.id_asiento')
+            ->join('filas', 'filas.id', '=', 'asientos.id_fila')
+            ->where('boletos.id_evento', $data['event_id'])
+            ->whereIn('boletos.estado', ['vendido', 'usado'])
+            ->groupBy('filas.id_zona')
+            ->selectRaw('filas.id_zona as zone_id, COUNT(*) as tickets, SUM(CASE WHEN boletos.estado = "usado" THEN 1 ELSE 0 END) as assisted');
+
+        $amountSubquery = DB::table('venta_detalle')
+            ->join('boletos', 'boletos.id', '=', 'venta_detalle.id_boleto')
+            ->join('asientos', 'asientos.id', '=', 'boletos.id_asiento')
+            ->join('filas', 'filas.id', '=', 'asientos.id_fila')
+            ->where('boletos.id_evento', $data['event_id'])
+            ->groupBy('filas.id_zona')
+            ->selectRaw('filas.id_zona as zone_id, SUM(venta_detalle.precio) as amount');
+
+        $rows = DB::table('zonas')
+            ->where('zonas.id_lienzo', $event->id_lienzo)
+            ->leftJoinSub($soldSubquery, 'sold', function ($join) {
+                $join->on('sold.zone_id', '=', 'zonas.id');
             })
-            ->leftJoinSub($attendanceSubquery, 'attendance', function ($join) {
-                $join->on('attendance.event_zone_id', '=', 'event_zones.id');
+            ->leftJoinSub($amountSubquery, 'sales', function ($join) {
+                $join->on('sales.zone_id', '=', 'zonas.id');
             })
             ->selectRaw(
-                "event_zones.name as zone,
-                COALESCE(sales.tickets, 0) as tickets,
+                "zonas.nombre as zone,
+                COALESCE(sold.tickets, 0) as tickets,
                 COALESCE(sales.amount, 0) as amount,
-                COALESCE(attendance.assisted, 0) as assisted,
+                COALESCE(sold.assisted, 0) as assisted,
                 CASE
-                    WHEN COALESCE(attendance.sold_tickets, 0) > 0
-                        THEN ROUND((COALESCE(attendance.assisted, 0) / attendance.sold_tickets) * 100, 2)
+                    WHEN COALESCE(sold.tickets, 0) > 0
+                        THEN ROUND((COALESCE(sold.assisted, 0) / sold.tickets) * 100, 2)
                     ELSE 0
                 END as attendance_rate"
             )
-            ->orderBy('event_zones.id')
+            ->orderBy('zonas.id')
             ->get();
 
         return response()->json($rows);

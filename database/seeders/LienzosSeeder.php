@@ -9,14 +9,16 @@ class LienzosSeeder extends Seeder
 {
     public function run(): void
     {
-        DB::table('lienzos')->insert([
+        DB::table('lienzos')->updateOrInsert(
             [
                 'nombre' => 'Lienzo Charro La Reata',
                 'ciudad' => 'San Luis Potosí',
+            ],
+            [
                 'capacidad_total' => 2000,
                 'created_at' => now(),
-                'updated_at' => now()
+                'updated_at' => now(),
             ]
-        ]);
+        );
     }
 }

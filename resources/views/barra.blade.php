@@ -4,8 +4,8 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Marca MGR</title>
-    @vite(['resources/css/app.css', 'resources/js/app.js'])
+    <title>POS Barra | Marca MGR</title>
+    @vite(['resources/css/app.css', 'resources/js/barra.js'])
 </head>
 
 <body>

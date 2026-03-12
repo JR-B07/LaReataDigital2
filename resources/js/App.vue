@@ -64,17 +64,16 @@ const currency = (v) => `$${Number(v).toLocaleString('es-MX')}`;
 
 <template>
     <nav class="topbar">
-        <a href="/" class="topbar-brand">Chárro<span>Tickets</span></a>
+        <a href="/" class="topbar-brand">Marca <span>MGR</span></a>
         <div class="topbar-nav">
             <a href="/" class="active">Inicio</a>
-            <a href="/vendedor">Iniciar sesion</a>
         </div>
     </nav>
     <div class="page-label">Portal Público — Eventos en vivo</div>
 
     <section class="hero">
         <div class="hero-badge">Plataforma Oficial de Charreada · México</div>
-        <h1 class="hero-title">Chárro<span>Tickets</span></h1>
+        <h1 class="hero-title">Marca <span>MGR</span></h1>
         <p class="hero-sub">Tu acceso a las mejores charreadas de México — compra segura en línea</p>
         <div class="search-bar">
             <input v-model="search" type="text" placeholder="Buscar evento, ciudad, lienzo charro...">
@@ -142,8 +141,11 @@ const currency = (v) => `$${Number(v).toLocaleString('es-MX')}`;
     </div>
 
     <footer class="site-footer">
-        <div class="footer-brand">Chárro<span>Tickets</span></div>
-        <div class="footer-text">© 2025 ChárroTickets · Todos los derechos reservados · México</div>
+        <div class="footer-brand">Marca <span>MGR</span></div>
+        <div class="footer-meta">
+            <div class="footer-text">© 2025 Marca MGR · Todos los derechos reservados · México</div>
+            <a href="/taquilla" class="footer-access">Acceso interno de taquilla</a>
+        </div>
     </footer>
 </template>
 
@@ -278,6 +280,48 @@ body { font-family: 'Libre Baskerville', serif; background: var(--cafe); color: 
 .btn-comprar { background: var(--rojo); border: none; padding: 10px 18px; color: var(--crema); font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 2px; cursor: pointer; text-transform: uppercase; transition: background 0.2s; }
 .btn-comprar:hover { background: #A02020; }
 .btn-agotado { background: rgba(107,96,85,0.3); border: 1px solid var(--gris); padding: 10px 18px; color: var(--gris); font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 2px; cursor: not-allowed; text-transform: uppercase; }
+.site-footer {
+    padding: 28px 40px 40px;
+    border-top: 1px solid rgba(200,146,42,0.2);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+.footer-brand { font-family: 'Playfair Display', serif; font-size: 22px; color: var(--crema); }
+.footer-brand span { color: var(--dorado-claro); }
+.footer-meta {
+    display: flex;
+    align-items: flex-end;
+    gap: 10px;
+    flex-direction: column;
+}
+.footer-text { color: var(--gris); font-size: 12px; }
+.footer-access {
+    color: rgba(240, 192, 96, 0.72);
+    text-decoration: none;
+    font-family: 'DM Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 1.8px;
+    text-transform: uppercase;
+    transition: color 0.2s;
+}
+.footer-access:hover {
+    color: var(--dorado-claro);
+}
+
+@media (max-width: 720px) {
+    .site-footer {
+        padding: 24px;
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .footer-meta {
+        align-items: flex-start;
+    }
+}
 
 .featured-card {
     background: linear-gradient(135deg, #3D0808, #1A0800);

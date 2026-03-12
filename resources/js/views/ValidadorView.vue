@@ -7,6 +7,7 @@ const loginName = ref('');
 const loginPass = ref('');
 const loginError = ref('');
 const loggingIn = ref(false);
+const allowedRoles = ['validator', 'admin'];
 
 const manualCode = ref('');
 const countValid = ref(0);
@@ -25,6 +26,8 @@ const ax = () => {
     return instance;
 };
 
+const hasAllowedRole = (role) => allowedRoles.includes(role);
+
 const doLogin = async () => {
     loggingIn.value = true;
     loginError.value = '';
@@ -32,15 +35,17 @@ const doLogin = async () => {
         const { data } = await window.axios.post('/api/auth/login', {
             login: loginName.value,
             password: loginPass.value,
+            intended_roles: allowedRoles,
         });
+
+        if (!hasAllowedRole(data.user?.role)) {
+            loginError.value = 'Esta cuenta no tiene acceso al validador.';
+            return;
+        }
+
         token.value = data.token;
         user.value = data.user;
         localStorage.setItem('auth_token', data.token);
-
-        if (['seller', 'admin'].includes(data.user?.role)) {
-            window.location.href = '/vendedor';
-            return;
-        }
     } catch (e) {
         loginError.value = e.response?.data?.message || 'Credenciales inválidas.';
     } finally {
@@ -61,12 +66,19 @@ const doLogout = async () => {
     window.location.href = '/';
 };
 
+const clearInvalidSession = () => {
+    token.value = '';
+    user.value = null;
+    localStorage.removeItem('auth_token');
+};
+
 onMounted(async () => {
     if (token.value) {
         try {
             const { data } = await ax().get('/api/auth/me');
-            if (['seller', 'admin'].includes(data?.role)) {
-                window.location.href = '/vendedor';
+            if (!hasAllowedRole(data?.role)) {
+                clearInvalidSession();
+                loginError.value = 'Esta cuenta no tiene acceso al validador.';
                 return;
             }
 
@@ -126,7 +138,7 @@ const validateManual = async () => {
 
 <template>
     <nav class="topbar">
-        <a href="/" class="topbar-brand">Chárro<span>Tickets</span></a>
+        <a href="/" class="topbar-brand">Marca <span>MGR</span></a>
         <div class="topbar-nav">
             <a v-if="token" href="#" class="active" @click.prevent="doLogout">Cerrar Sesion</a>
             <a v-else href="/">Inicio</a>
@@ -155,7 +167,7 @@ const validateManual = async () => {
     <template v-else>
         <div class="event-header">
             <div class="event-header-info">
-                <div class="event-header-name">Validador ChárroTickets</div>
+                <div class="event-header-name">Validador Marca MGR</div>
                 <div class="event-header-meta">OPERADOR: {{ user?.name || '...' }} · {{ user?.role?.toUpperCase() }}</div>
             </div>
             <div class="live-badge"><div class="live-dot"></div>EN VIVO</div>

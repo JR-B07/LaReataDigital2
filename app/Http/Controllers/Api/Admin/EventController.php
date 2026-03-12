@@ -4,6 +4,8 @@ namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Event;
+use App\Models\EventZone;
+use App\Models\Lienzo;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -12,7 +14,7 @@ class EventController extends Controller
 {
     public function index(): JsonResponse
     {
-        $events = Event::query()->with('zones', 'validators:id,name,email')->latest()->paginate(15);
+        $events = Event::query()->with('lienzo', 'zones')->latest()->paginate(15);
 
         return response()->json($events);
     }
@@ -28,32 +30,54 @@ class EventController extends Controller
             'ends_at' => ['nullable', 'date', 'after_or_equal:starts_at'],
             'barcode_format' => ['required', 'in:qr,code128'],
             'status' => ['nullable', 'in:draft,published,canceled'],
-            'zones' => ['required', 'array', 'min:1'],
-            'zones.*.name' => ['required', 'string', 'max:120'],
-            'zones.*.capacity' => ['required', 'integer', 'min:1'],
-            'zones.*.price' => ['required', 'numeric', 'min:0'],
+            'zones' => ['nullable', 'array'],
+            'zones.*.name' => ['required_with:zones', 'string', 'max:120'],
+            'zones.*.capacity' => ['nullable', 'integer', 'min:1'],
+            'zones.*.price' => ['required_with:zones', 'numeric', 'min:0'],
         ]);
 
+        $capacity = collect($data['zones'] ?? [])->sum(fn ($zone) => (int) ($zone['capacity'] ?? 0));
+
+        $lienzo = Lienzo::query()->firstOrCreate(
+            [
+                'nombre' => $data['venue'],
+                'ciudad' => $data['city'],
+            ],
+            [
+                'capacidad_total' => max(1, $capacity),
+            ]
+        );
+
+        if ($capacity > 0 && $capacity > (int) $lienzo->capacidad_total) {
+            $lienzo->update(['capacidad_total' => $capacity]);
+        }
+
         $event = Event::query()->create([
-            'organizer_id' => $request->user()->id,
+            'id_lienzo' => $lienzo->id,
             'name' => $data['name'],
-            'description' => $data['description'] ?? null,
-            'city' => $data['city'],
-            'venue' => $data['venue'],
             'starts_at' => $data['starts_at'],
-            'ends_at' => $data['ends_at'] ?? null,
             'barcode_format' => $data['barcode_format'],
             'status' => $data['status'] ?? 'draft',
         ]);
 
-        $event->zones()->createMany($data['zones']);
+        foreach (($data['zones'] ?? []) as $zone) {
+            EventZone::query()->updateOrCreate(
+                [
+                    'id_lienzo' => $lienzo->id,
+                    'nombre' => $zone['name'],
+                ],
+                [
+                    'precio' => $zone['price'],
+                ]
+            );
+        }
 
         return response()->json($event->load('zones'), 201);
     }
 
     public function show(Event $event): JsonResponse
     {
-        return response()->json($event->load('zones', 'validators:id,name,email'));
+        return response()->json($event->load('zones', 'lienzo'));
     }
 
     public function update(Request $request, Event $event): JsonResponse
@@ -69,18 +93,42 @@ class EventController extends Controller
             'status' => ['sometimes', 'required', 'in:draft,published,canceled'],
             'zones' => ['sometimes', 'array', 'min:1'],
             'zones.*.name' => ['required_with:zones', 'string', 'max:120'],
-            'zones.*.capacity' => ['required_with:zones', 'integer', 'min:1'],
+            'zones.*.capacity' => ['nullable', 'integer', 'min:1'],
             'zones.*.price' => ['required_with:zones', 'numeric', 'min:0'],
         ]);
 
-        $event->update($data);
+        if (isset($data['city'], $data['venue'])) {
+            $lienzo = Lienzo::query()->firstOrCreate(
+                [
+                    'nombre' => $data['venue'],
+                    'ciudad' => $data['city'],
+                ],
+                [
+                    'capacidad_total' => max(1, collect($data['zones'] ?? [])->sum('capacity')),
+                ]
+            );
 
-        if (isset($data['zones'])) {
-            $event->zones()->delete();
-            $event->zones()->createMany($data['zones']);
+            $event->id_lienzo = $lienzo->id;
         }
 
-        return response()->json($event->load('zones', 'validators:id,name,email'));
+        $event->fill($data);
+        $event->save();
+
+        if (isset($data['zones'])) {
+            foreach ($data['zones'] as $zone) {
+                EventZone::query()->updateOrCreate(
+                    [
+                        'id_lienzo' => $event->id_lienzo,
+                        'nombre' => $zone['name'],
+                    ],
+                    [
+                        'precio' => $zone['price'],
+                    ]
+                );
+            }
+        }
+
+        return response()->json($event->load('zones', 'lienzo'));
     }
 
     public function destroy(Event $event): JsonResponse
@@ -107,7 +155,7 @@ class EventController extends Controller
     public function assignValidator(Request $request, Event $event): JsonResponse
     {
         $data = $request->validate([
-            'validator_id' => ['required', 'exists:users,id'],
+            'validator_id' => ['required', 'exists:usuarios,id'],
         ]);
 
         $validator = User::query()->findOrFail($data['validator_id']);
@@ -116,18 +164,14 @@ class EventController extends Controller
             return response()->json(['message' => 'El usuario no tiene rol validator'], 422);
         }
 
-        $event->validators()->syncWithoutDetaching([$validator->id]);
-
-        return response()->json(['message' => 'Validador asignado']);
+        return response()->json(['message' => 'Validador validado (sin asignacion persistente en este esquema)']);
     }
 
     public function unassignValidator(Request $request, Event $event): JsonResponse
     {
         $data = $request->validate([
-            'validator_id' => ['required', 'exists:users,id'],
+            'validator_id' => ['required', 'exists:usuarios,id'],
         ]);
-
-        $event->validators()->detach($data['validator_id']);
 
         return response()->json(['message' => 'Validador removido']);
     }

@@ -13,17 +13,20 @@ class Usuarios extends Authenticatable
     /** @use HasFactory<\Database\Factories\UserFactory> */
     use HasApiTokens, HasFactory, Notifiable;
 
+    protected $table = 'usuarios';
+
     /**
      * The attributes that are mass assignable.
      *
      * @var list<string>
      */
     protected $fillable = [
-        'name',
-        'email',
-        'phone',
-        'role',
+        'nombre',
+        'usuario',
+        'telefono',
+        'rol',
         'password',
+        'activo',
     ];
 
     /**
@@ -33,7 +36,13 @@ class Usuarios extends Authenticatable
      */
     protected $hidden = [
         'password',
-        'remember_token',
+    ];
+
+    protected $appends = [
+        'name',
+        'email',
+        'phone',
+        'role',
     ];
 
     /**
@@ -44,18 +53,70 @@ class Usuarios extends Authenticatable
     protected function casts(): array
     {
         return [
-            'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'activo' => 'boolean',
         ];
+    }
+
+    public function getNameAttribute(): string
+    {
+        return (string) ($this->attributes['nombre'] ?? '');
+    }
+
+    public function setNameAttribute(?string $value): void
+    {
+        $this->attributes['nombre'] = $value;
+    }
+
+    public function getEmailAttribute(): string
+    {
+        return (string) ($this->attributes['usuario'] ?? '');
+    }
+
+    public function setEmailAttribute(?string $value): void
+    {
+        $this->attributes['usuario'] = $value;
+    }
+
+    public function getPhoneAttribute(): ?string
+    {
+        return $this->attributes['telefono'] ?? null;
+    }
+
+    public function setPhoneAttribute(?string $value): void
+    {
+        $this->attributes['telefono'] = $value;
+    }
+
+    public function getRoleAttribute(): string
+    {
+        $rol = (string) ($this->attributes['rol'] ?? 'vendedor');
+
+        return match ($rol) {
+            'superadministrador', 'administrador' => 'admin',
+            'checador' => 'validator',
+            'promotor' => 'seller',
+            default => 'seller',
+        };
+    }
+
+    public function setRoleAttribute(?string $value): void
+    {
+        $this->attributes['rol'] = match ($value) {
+            'admin' => 'administrador',
+            'validator' => 'checador',
+            'buyer', 'seller' => 'vendedor',
+            default => $value ?: 'vendedor',
+        };
     }
 
     public function isAdmin(): bool
     {
-        return $this->role === 'admin';
+        return $this->getRoleAttribute() === 'admin';
     }
 
     public function isValidator(): bool
     {
-        return $this->role === 'validator';
+        return $this->getRoleAttribute() === 'validator';
     }
 }

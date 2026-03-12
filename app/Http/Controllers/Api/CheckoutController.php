@@ -3,134 +3,193 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\DiscountCode;
+use App\Mail\TicketsPurchasedMail;
 use App\Models\Event;
-use App\Models\EventZone;
 use App\Models\Order;
-use App\Models\User;
+use App\Models\Ticket;
 use App\Services\TicketCodeService;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
+use Throwable;
 
 class CheckoutController extends Controller
 {
-    public function __construct(private readonly TicketCodeService $ticketCodeService)
-    {
-    }
+    public function __construct(private readonly TicketCodeService $ticketCodeService) {}
 
     public function store(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'event_id' => ['required', 'exists:events,id'],
-            'event_zone_id' => ['required', 'exists:event_zones,id'],
+            'event_id' => ['required', 'exists:eventos,id'],
+            'event_zone_id' => ['required', 'exists:zonas,id'],
             'quantity' => ['required', 'integer', 'min:1', 'max:20'],
             'buyer_name' => ['required', 'string', 'max:255'],
-            'buyer_email' => ['required', 'email', 'max:255'],
+            'buyer_email' => ['required', 'string', 'max:255'],
             'buyer_phone' => ['nullable', 'string', 'max:30'],
             'payment_method' => ['required', 'in:card,oxxo,transfer'],
             'discount_code' => ['nullable', 'string', 'max:50'],
+            'payment_reference' => ['nullable', 'string', 'max:120'],
         ]);
 
-        $event = Event::query()->where('status', 'published')->findOrFail($data['event_id']);
-        $zone = EventZone::query()->where('event_id', $event->id)->findOrFail($data['event_zone_id']);
+        $context = $this->resolveCheckoutContext($data);
 
-        $available = $zone->capacity - $zone->sold_count;
-        if ($data['quantity'] > $available) {
+        if (isset($context['error'])) {
             return response()->json([
-                'message' => 'No hay suficientes boletos disponibles en esta zona.',
+                'message' => $context['error'],
             ], 422);
         }
 
-        $subtotal = $zone->price * $data['quantity'];
+        $event = $context['event'];
+        $availableTickets = $context['available_tickets'];
+        $subtotal = $context['subtotal'];
         $discountTotal = 0;
-        $discount = null;
-
-        if (! empty($data['discount_code'])) {
-            $discount = DiscountCode::query()
-                ->where('event_id', $event->id)
-                ->where('code', Str::upper($data['discount_code']))
-                ->where('is_active', true)
-                ->first();
-
-            if ($discount) {
-                $isExpired = $discount->expires_at && $discount->expires_at->isPast();
-                $maxReached = $discount->max_uses !== null && $discount->used_count >= $discount->max_uses;
-
-                if (! $isExpired && ! $maxReached) {
-                    $discountTotal = $discount->type === 'percent'
-                        ? round($subtotal * ($discount->value / 100), 2)
-                        : min($subtotal, $discount->value);
-                }
-            }
-        }
-
         $total = max(0, $subtotal - $discountTotal);
 
-        $order = DB::transaction(function () use ($data, $event, $zone, $subtotal, $discountTotal, $total, $discount) {
-            // Guest checkout: keep order buyer data without requiring individual user profiles.
-            $buyer = User::query()->firstOrCreate(
-                ['email' => 'invitado@lareata.local'],
-                [
-                    'name' => 'Comprador Invitado',
-                    'phone' => null,
-                    'password' => Str::password(16),
-                    'role' => 'buyer',
-                ]
-            );
-
+        $result = DB::transaction(function () use ($data, $event, $availableTickets, $subtotal, $total) {
             $order = Order::query()->create([
-                'event_id' => $event->id,
-                'user_id' => $buyer->id,
-                'buyer_name' => $data['buyer_name'],
-                'buyer_email' => $data['buyer_email'],
-                'buyer_phone' => $data['buyer_phone'] ?? null,
-                'payment_method' => $data['payment_method'],
-                'payment_status' => 'paid',
-                'subtotal' => $subtotal,
-                'discount_total' => $discountTotal,
+                // Las compras publicas no deben crear cuentas operativas reutilizables.
+                'id_usuario' => null,
                 'total' => $total,
-                'discount_code' => $discount?->code,
+                'metodo_pago' => match ($data['payment_method']) {
+                    'card' => 'tarjeta',
+                    'transfer' => 'transferencia',
+                    default => 'efectivo',
+                },
+                'canal_venta' => 'online',
+                'estado_pago' => 'pagado',
+                'nombre_cliente' => $data['buyer_name'],
+                'telefono_cliente' => $data['buyer_phone'] ?? null,
+                'correo_cliente' => $data['buyer_email'],
+                'referencia_pago' => $data['payment_reference'] ?? null,
             ]);
 
-            $item = $order->items()->create([
-                'event_zone_id' => $zone->id,
-                'quantity' => $data['quantity'],
-                'unit_price' => $zone->price,
-                'subtotal' => $subtotal,
-            ]);
+            $ticketRows = [];
+            $ticketIds = [];
 
-            for ($i = 0; $i < $data['quantity']; $i++) {
-                $ticketCode = $this->ticketCodeService->generateUniqueCode();
-                $payload = $this->ticketCodeService->makePayload([
-                    'ticket_code' => $ticketCode,
-                    'event_id' => $event->id,
-                    'event_zone_id' => $zone->id,
-                    'purchased_at' => now()->toISOString(),
+            foreach ($availableTickets as $ticket) {
+                DB::table('boletos')->where('id', $ticket->id)->update([
+                    'estado' => 'vendido',
+                    'updated_at' => now(),
                 ]);
 
-                $order->tickets()->create([
-                    'event_id' => $event->id,
-                    'order_item_id' => $item->id,
-                    'event_zone_id' => $zone->id,
-                    'user_id' => $buyer->id,
-                    'ticket_code' => $ticketCode,
-                    'qr_payload' => $payload,
-                    'status' => 'active',
+                $ticketIds[] = $ticket->id;
+
+                DB::table('venta_detalle')->insert([
+                    'id_venta' => $order->id,
+                    'id_boleto' => $ticket->id,
+                    'precio' => $ticket->precio,
                 ]);
+
+                $ticketRows[] = [
+                    'ticket_code' => $ticket->codigo_qr,
+                ];
             }
 
-            $zone->increment('sold_count', $data['quantity']);
-
-            if ($discount) {
-                $discount->increment('used_count');
-            }
-
-            return $order->load('event', 'items.zone', 'tickets');
+            return [
+                'order' => [
+                    'id' => $order->id,
+                    'total' => $order->total,
+                    'subtotal' => $subtotal,
+                ],
+                'tickets' => $ticketRows,
+                'ticket_ids' => $ticketIds,
+            ];
         });
 
-        return response()->json($order, 201);
+        $order = Order::query()->find($result['order']['id']);
+        $tickets = Ticket::query()
+            ->with(['event', 'order', 'item'])
+            ->whereIn('id', $result['ticket_ids'])
+            ->get()
+            ->sortBy('id')
+            ->values();
+
+        $result['email_delivery'] = $this->deliverOrderTickets($order, $event, $tickets);
+        unset($result['ticket_ids']);
+
+        return response()->json($result, 201);
+    }
+
+    public function createMercadoPagoPreference(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'event_id' => ['required', 'exists:eventos,id'],
+            'event_zone_id' => ['required', 'exists:zonas,id'],
+            'quantity' => ['required', 'integer', 'min:1', 'max:20'],
+            'buyer_name' => ['required', 'string', 'max:255'],
+            'buyer_email' => ['required', 'string', 'max:255'],
+            'buyer_phone' => ['nullable', 'string', 'max:30'],
+            'success_url' => ['nullable', 'url'],
+            'failure_url' => ['nullable', 'url'],
+            'pending_url' => ['nullable', 'url'],
+        ]);
+
+        $token = (string) config('services.mercadopago.access_token');
+        if ($token === '') {
+            return response()->json([
+                'message' => 'Mercado Pago no configurado. Falta MERCADOPAGO_ACCESS_TOKEN.',
+            ], 422);
+        }
+
+        $context = $this->resolveCheckoutContext($data);
+
+        if (isset($context['error'])) {
+            return response()->json([
+                'message' => $context['error'],
+            ], 422);
+        }
+
+        $event = $context['event'];
+        $zone = $context['zone'];
+        $subtotal = $context['subtotal'];
+        $total = max(0, $subtotal);
+
+        $baseUrl = rtrim((string) config('app.url'), '/');
+        $successUrl = $data['success_url'] ?? "{$baseUrl}/compra?event={$event->id}";
+        $failureUrl = $data['failure_url'] ?? "{$baseUrl}/compra?event={$event->id}";
+        $pendingUrl = $data['pending_url'] ?? "{$baseUrl}/compra?event={$event->id}";
+
+        $payload = [
+            'items' => [[
+                'title' => "{$event->name} - {$zone->nombre}",
+                'quantity' => (int) $data['quantity'],
+                'currency_id' => 'MXN',
+                'unit_price' => round($total / max(1, (int) $data['quantity']), 2),
+            ]],
+            'payer' => [
+                'name' => $data['buyer_name'],
+                'email' => $data['buyer_email'],
+            ],
+            'back_urls' => [
+                'success' => $successUrl,
+                'failure' => $failureUrl,
+                'pending' => $pendingUrl,
+            ],
+            'auto_return' => 'approved',
+            'external_reference' => "EV{$event->id}-ZN{$zone->id}-Q{$data['quantity']}",
+            'statement_descriptor' => 'LAREATA DIGITAL',
+        ];
+
+        $response = Http::withToken($token)
+            ->acceptJson()
+            ->post('https://api.mercadopago.com/checkout/preferences', $payload);
+
+        if (! $response->successful()) {
+            return response()->json([
+                'message' => 'No se pudo crear la preferencia de pago en Mercado Pago.',
+                'details' => $response->json(),
+            ], 422);
+        }
+
+        return response()->json([
+            'redirect_url' => $response->json('init_point') ?: $response->json('sandbox_init_point'),
+            'preference_id' => $response->json('id'),
+        ]);
     }
 
     public function history(Request $request): JsonResponse
@@ -138,11 +197,93 @@ class CheckoutController extends Controller
         $user = $request->user();
 
         $orders = Order::query()
-            ->with('event', 'items.zone', 'tickets')
-            ->where('user_id', $user->id)
+            ->where('id_usuario', $user->id)
             ->latest()
             ->paginate(10);
 
         return response()->json($orders);
+    }
+
+    private function resolveCheckoutContext(array $data): array
+    {
+        $event = Event::query()->where('estatus', 'activo')->findOrFail($data['event_id']);
+        $zone = DB::table('zonas')
+            ->where('id', $data['event_zone_id'])
+            ->where('id_lienzo', $event->id_lienzo)
+            ->first();
+
+        if (! $zone) {
+            return ['error' => 'La zona seleccionada no pertenece al evento.'];
+        }
+
+        $availableTickets = DB::table('boletos')
+            ->join('asientos', 'asientos.id', '=', 'boletos.id_asiento')
+            ->join('filas', 'filas.id', '=', 'asientos.id_fila')
+            ->where('boletos.id_evento', $event->id)
+            ->where('filas.id_zona', $zone->id)
+            ->where('boletos.estado', 'disponible')
+            ->select('boletos.id', 'boletos.precio', 'boletos.codigo_qr')
+            ->limit($data['quantity'])
+            ->get();
+
+        if ($availableTickets->count() < $data['quantity']) {
+            return ['error' => 'No hay suficientes boletos disponibles en esta zona.'];
+        }
+
+        return [
+            'event' => $event,
+            'zone' => $zone,
+            'available_tickets' => $availableTickets,
+            'subtotal' => (float) $availableTickets->sum('precio'),
+        ];
+    }
+
+    private function deliverOrderTickets(?Order $order, Event $event, Collection $tickets): array
+    {
+        $mailer = (string) config('mail.default', 'log');
+        $supportsExternalDelivery = ! in_array($mailer, ['log', 'array'], true);
+
+        if (! $order || ! $order->buyer_email) {
+            return [
+                'attempted' => false,
+                'sent' => false,
+                'mode' => $mailer,
+                'message' => 'La compra se registró, pero no hay un correo de destino para enviar los boletos.',
+            ];
+        }
+
+        try {
+            $attachments = $tickets->map(function (Ticket $ticket) {
+                return [
+                    'name' => "ticket-{$ticket->ticket_code}.pdf",
+                    'data' => Pdf::loadView('tickets.pdf', ['ticket' => $ticket])->output(),
+                ];
+            })->all();
+
+            Mail::to($order->buyer_email)->send(new TicketsPurchasedMail($order, $event, $tickets, $attachments));
+
+            return [
+                'attempted' => true,
+                'sent' => $supportsExternalDelivery,
+                'mode' => $mailer,
+                'message' => $supportsExternalDelivery
+                    ? 'Tus boletos fueron enviados a tu correo electrónico.'
+                    : 'La compra se registró y el correo fue generado en modo local. Configura MAIL_MAILER con SMTP o un proveedor real para entregarlo a una bandeja externa.',
+            ];
+        } catch (Throwable $exception) {
+            Log::error('No se pudieron enviar los boletos por correo.', [
+                'order_id' => $order->id,
+                'buyer_email' => $order->buyer_email,
+                'mailer' => $mailer,
+                'error' => $exception->getMessage(),
+            ]);
+
+            return [
+                'attempted' => true,
+                'sent' => false,
+                'mode' => $mailer,
+                'message' => 'La compra se registró, pero no se pudo enviar el correo. Puedes descargar los PDFs desde esta confirmación.',
+            ];
+        }
     }
 }

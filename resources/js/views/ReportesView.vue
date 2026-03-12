@@ -7,6 +7,7 @@ const loginName = ref('');
 const loginPass = ref('');
 const loginError = ref('');
 const loggingIn = ref(false);
+const allowedRoles = ['seller', 'admin'];
 
 const summary = ref({ orders_count: 0, tickets_sold: 0, revenue_total: 0, attendance_rate: 0, fraud_attempts: 0 });
 const events = ref([]);
@@ -20,18 +21,19 @@ const ax = () => {
     return i;
 };
 
+const hasAllowedRole = (role) => allowedRoles.includes(role);
+
 const doLogin = async () => {
     loggingIn.value = true; loginError.value = '';
     try {
-        const { data } = await window.axios.post('/api/auth/login', { login: loginName.value, password: loginPass.value });
+        const { data } = await window.axios.post('/api/auth/login', {
+            login: loginName.value,
+            password: loginPass.value,
+            intended_roles: allowedRoles,
+        });
         token.value = data.token;
         user.value = data.user;
         localStorage.setItem('auth_token', data.token);
-
-        if (data.user?.role === 'validator') {
-            window.location.href = '/validador';
-            return;
-        }
 
         window.location.href = '/vendedor';
     } catch (e) { loginError.value = e.response?.data?.message || 'Credenciales inválidas.'; }
@@ -49,6 +51,12 @@ const doLogout = async () => {
     user.value = null;
     localStorage.removeItem('auth_token');
     window.location.href = '/';
+};
+
+const clearInvalidSession = () => {
+    token.value = '';
+    user.value = null;
+    localStorage.removeItem('auth_token');
 };
 
 const loadData = async () => {
@@ -77,8 +85,9 @@ onMounted(async () => {
     if (token.value) {
         try {
             const { data } = await ax().get('/api/auth/me');
-            if (data?.role === 'validator') {
-                window.location.href = '/validador';
+            if (!hasAllowedRole(data?.role)) {
+                clearInvalidSession();
+                loginError.value = 'Esta cuenta no tiene acceso a reportes.';
                 return;
             }
 
@@ -112,11 +121,12 @@ const donutSegments = computed(() => {
 });
 
 const sortedEvents = computed(() => [...events.value].sort((a, b) => totalRevenue(b) - totalRevenue(a)).slice(0, 10));
+const showSidebar = computed(() => user.value?.role === 'admin');
 </script>
 
 <template>
     <nav class="topbar">
-        <a href="/" class="topbar-brand">Chárro<span>Tickets</span></a>
+        <a href="/" class="topbar-brand">Marca <span>MGR</span></a>
         <div class="topbar-nav">
             <a v-if="token" href="#" class="active" @click.prevent="doLogout">Cerrar Sesion</a>
             <a v-else href="/">Inicio</a>
@@ -138,8 +148,8 @@ const sortedEvents = computed(() => [...events.value].sort((a, b) => totalRevenu
     </div>
 
     <!-- Reportes -->
-    <div v-else class="report-layout">
-        <div class="admin-sidebar">
+    <div v-else :class="['report-layout', { 'no-sidebar': !showSidebar }]">
+        <div v-if="showSidebar" class="admin-sidebar">
             <div class="nav-group-label">Principal</div>
             <a href="/vendedor" class="nav-item">📊 Dashboard</a>
             <div class="nav-group-label">Reportes</div>
@@ -311,6 +321,7 @@ body { font-family: 'Libre Baskerville', serif; background: var(--cafe); color: 
 .topbar-nav a:hover, .topbar-nav a.active { color: var(--dorado-claro); border-bottom-color: var(--dorado-claro); }
 .page-label { background: var(--bg); padding: 8px 32px; font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 3px; text-transform: uppercase; color: var(--gris); border-bottom: 1px solid rgba(200,146,42,0.2); }
 .report-layout { display: grid; grid-template-columns: 230px 1fr; min-height: calc(100vh - 82px); }
+.report-layout.no-sidebar { grid-template-columns: 1fr; }
 .admin-sidebar { background: #100400; border-right: 1px solid rgba(200,146,42,0.2); padding-top: 8px; }
 .nav-group-label { font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: 3px; color: rgba(107,96,85,0.5); padding: 12px 20px 6px; text-transform: uppercase; }
 .nav-item { padding: 11px 20px; font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 1px; color: var(--gris); cursor: pointer; display: flex; align-items: center; gap: 10px; transition: all 0.2s; text-decoration: none; text-transform: uppercase; border-left: 3px solid transparent; }

@@ -10,6 +10,18 @@ Route::get('/compra', function () {
     return view('compra');
 });
 
+Route::get('/taquilla', function () {
+    return view('taquilla');
+});
+
+Route::get('/barra', function () {
+    return view('barra');
+});
+
+Route::get('/vendedor/barra', function () {
+    return view('barra');
+});
+
 Route::get('/imprimir', function () {
     return view('imprimir');
 });

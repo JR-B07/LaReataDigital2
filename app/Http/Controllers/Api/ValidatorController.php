@@ -4,9 +4,9 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Ticket;
-use App\Models\TicketScan;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class ValidatorController extends Controller
 {
@@ -14,23 +14,18 @@ class ValidatorController extends Controller
     {
         $data = $request->validate([
             'ticket_code' => ['required', 'string'],
-            'event_id' => ['nullable', 'exists:events,id'],
+            'event_id' => ['nullable', 'exists:eventos,id'],
         ]);
 
         $ticket = Ticket::query()
-            ->with('event', 'zone')
-            ->where('ticket_code', $data['ticket_code'])
+            ->with('event')
+            ->where(function ($query) use ($data) {
+                $query->where('codigo_qr', $data['ticket_code'])
+                    ->orWhere('codigo_barras', $data['ticket_code']);
+            })
             ->first();
 
         if (! $ticket) {
-            TicketScan::query()->create([
-                'event_id' => $data['event_id'] ?? null,
-                'validator_id' => $request->user()?->id,
-                'scanned_code' => $data['ticket_code'],
-                'result' => 'invalid',
-                'message' => 'Código inexistente',
-            ]);
-
             return response()->json([
                 'result' => 'invalid',
                 'color' => 'red',
@@ -38,7 +33,7 @@ class ValidatorController extends Controller
             ], 422);
         }
 
-        if (! empty($data['event_id']) && (int) $data['event_id'] !== (int) $ticket->event_id) {
+        if (! empty($data['event_id']) && (int) $data['event_id'] !== (int) $ticket->id_evento) {
             return response()->json([
                 'result' => 'invalid',
                 'color' => 'red',
@@ -46,15 +41,7 @@ class ValidatorController extends Controller
             ], 422);
         }
 
-        if ($ticket->status !== 'active') {
-            TicketScan::query()->create([
-                'event_id' => $ticket->event_id,
-                'ticket_id' => $ticket->id,
-                'validator_id' => $request->user()?->id,
-                'scanned_code' => $ticket->ticket_code,
-                'result' => 'used',
-                'message' => 'Boleto ya utilizado',
-            ]);
+        if ($ticket->estado === 'usado') {
 
             return response()->json([
                 'result' => 'used',
@@ -63,18 +50,23 @@ class ValidatorController extends Controller
             ], 409);
         }
 
+        if ($ticket->estado !== 'vendido') {
+            return response()->json([
+                'result' => 'invalid',
+                'color' => 'red',
+                'message' => 'El boleto aun no esta vendido o no es valido.',
+            ], 422);
+        }
+
         $ticket->update([
-            'status' => 'used',
-            'scanned_at' => now(),
+            'estado' => 'usado',
+            'escaneado' => true,
         ]);
 
-        TicketScan::query()->create([
-            'event_id' => $ticket->event_id,
-            'ticket_id' => $ticket->id,
-            'validator_id' => $request->user()?->id,
-            'scanned_code' => $ticket->ticket_code,
-            'result' => 'valid',
-            'message' => 'Boleto válido',
+        DB::table('accesos')->insert([
+            'id_boleto' => $ticket->id,
+            'id_usuario' => $request->user()?->id,
+            'fecha_escaneo' => now(),
         ]);
 
         return response()->json([
@@ -84,7 +76,7 @@ class ValidatorController extends Controller
             'ticket' => [
                 'code' => $ticket->ticket_code,
                 'event' => $ticket->event->name,
-                'zone' => $ticket->zone->name,
+                'zone' => 'Zona general',
                 'seat' => $ticket->seat,
             ],
         ]);
@@ -92,18 +84,13 @@ class ValidatorController extends Controller
 
     public function scans(Request $request): JsonResponse
     {
-        $eventId = $request->query('event_id');
+        $rows = DB::table('accesos')
+            ->join('boletos', 'boletos.id', '=', 'accesos.id_boleto')
+            ->selectRaw('accesos.id, accesos.id_usuario as validator_id, boletos.id_evento as event_id, boletos.codigo_qr as scanned_code, accesos.fecha_escaneo')
+            ->orderByDesc('accesos.id')
+            ->limit(30)
+            ->get();
 
-        $query = TicketScan::query()->latest()->limit(30);
-
-        if ($eventId) {
-            $query->where('event_id', $eventId);
-        }
-
-        if ($request->user()?->role === 'validator') {
-            $query->where('validator_id', $request->user()->id);
-        }
-
-        return response()->json($query->get());
+        return response()->json($rows);
     }
 }

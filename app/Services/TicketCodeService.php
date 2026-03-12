@@ -10,7 +10,7 @@ class TicketCodeService
     {
         do {
             $code = 'LRD-'.strtoupper(bin2hex(random_bytes(4))).'-'.strtoupper(bin2hex(random_bytes(2)));
-        } while (Ticket::query()->where('ticket_code', $code)->exists());
+        } while (Ticket::query()->where('codigo_qr', $code)->orWhere('codigo_barras', $code)->exists());
 
         return $code;
     }
