@@ -297,7 +297,13 @@ const cancelEvent = async (ev) => {
             <div class="nav-group">
                 <div class="nav-group-label">Operaciones</div>
                 <a href="/barra" class="nav-item">🍻 POS Barra</a>
-                <a href="/vendedor/reportes" class="nav-item">📈 Reportes</a>
+                <a href="/vendedor/reportes" class="nav-item">📈 Reportes Tickets</a>
+                <a v-if="isAdmin" href="/barra-reportes" class="nav-item">🍺 Reportes Barra</a>
+            </div>
+
+            <div v-if="isAdmin" class="nav-group">
+                <div class="nav-group-label">Administración</div>
+                <a href="/usuarios" class="nav-item">👥 Usuarios</a>
             </div>
 
             <div class="nav-group">

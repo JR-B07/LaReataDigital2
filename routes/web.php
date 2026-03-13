@@ -45,3 +45,11 @@ Route::get('/reportes', function () {
 Route::get('/vendedor/reportes', function () {
     return view('reportes');
 });
+
+Route::get('/usuarios', function () {
+    return view('usuarios');
+});
+
+Route::get('/barra-reportes', function () {
+    return view('barra-reportes');
+});
