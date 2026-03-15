@@ -12,19 +12,22 @@ class PublicEventController extends Controller
     public function index(Request $request): JsonResponse
     {
         $query = Event::query()
-            ->with('zones')
-            ->where('status', 'published')
-            ->orderBy('starts_at');
+            ->with('zones', 'lienzo')
+            ->where('estatus', 'activo')
+            ->orderBy('fecha')
+            ->orderBy('hora');
 
         if ($search = $request->string('search')->toString()) {
             $query->where(function ($q) use ($search) {
                 $q->where('name', 'like', "%{$search}%")
-                    ->orWhere('city', 'like', "%{$search}%");
+                    ->orWhereHas('lienzo', function ($lq) use ($search) {
+                        $lq->where('ciudad', 'like', "%{$search}%");
+                    });
             });
         }
 
         if ($date = $request->string('date')->toString()) {
-            $query->whereDate('starts_at', $date);
+            $query->whereDate('fecha', $date);
         }
 
         return response()->json($query->paginate(12));
@@ -32,7 +35,7 @@ class PublicEventController extends Controller
 
     public function show(Event $event): JsonResponse
     {
-        $event->load('zones');
+        $event->load('zones', 'lienzo');
 
         return response()->json($event);
     }

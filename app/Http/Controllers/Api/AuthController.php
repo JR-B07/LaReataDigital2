@@ -7,32 +7,14 @@ use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
     public function register(Request $request): JsonResponse
     {
-        $data = $request->validate([
-            'name' => ['required', 'string', 'max:255'],
-            'email' => ['required', 'email', 'max:255', 'unique:users,email'],
-            'phone' => ['nullable', 'string', 'max:30'],
-            'password' => ['required', 'string', 'min:8'],
-            'role' => ['nullable', 'in:buyer,seller,validator,admin'],
-        ]);
-
-        $user = User::query()->create([
-            'name' => $data['name'],
-            'email' => $data['email'],
-            'phone' => $data['phone'] ?? null,
-            'password' => $data['password'],
-            'role' => $data['role'] ?? 'buyer',
-        ]);
-
         return response()->json([
-            'token' => $user->createToken('api')->plainTextToken,
-            'user' => $user,
-        ], 201);
+            'message' => 'El registro público está deshabilitado.',
+        ], 403);
     }
 
     public function login(Request $request): JsonResponse
@@ -41,27 +23,37 @@ class AuthController extends Controller
             'login' => ['nullable', 'string'],
             'email' => ['nullable', 'string'],
             'password' => ['required', 'string'],
+            'intended_roles' => ['nullable', 'array'],
+            'intended_roles.*' => ['string', 'in:admin,seller,validator'],
         ]);
 
         $login = trim((string) ($data['login'] ?? $data['email'] ?? ''));
 
         if ($login === '') {
-            throw ValidationException::withMessages([
-                'login' => ['Debes indicar tu usuario o correo.'],
-            ]);
+            return response()->json([
+                'message' => 'Debes indicar tu usuario o correo.',
+            ], 422);
         }
 
         $normalizedLogin = strtolower(str_replace(' ', '', $login));
 
         $user = User::query()
-            ->whereRaw('LOWER(email) = ?', [strtolower($login)])
-            ->orWhereRaw("REPLACE(LOWER(name), ' ', '') = ?", [$normalizedLogin])
+            ->whereRaw('LOWER(usuario) = ?', [strtolower($login)])
+            ->orWhereRaw("REPLACE(LOWER(nombre), ' ', '') = ?", [$normalizedLogin])
             ->first();
 
-        if (! $user || ! Hash::check($data['password'], $user->password)) {
-            throw ValidationException::withMessages([
-                'login' => ['Credenciales inválidas.'],
-            ]);
+        if (! $user || ! $user->activo || ! Hash::check($data['password'], $user->password)) {
+            return response()->json([
+                'message' => 'Credenciales inválidas.',
+            ], 401);
+        }
+
+        $intendedRoles = $data['intended_roles'] ?? [];
+
+        if (! empty($intendedRoles) && ! in_array($user->role, $intendedRoles, true)) {
+            return response()->json([
+                'message' => 'Esta cuenta no tiene acceso a este módulo.',
+            ], 403);
         }
 
         return response()->json([

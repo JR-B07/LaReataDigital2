@@ -5,6 +5,7 @@ const event = ref(null);
 const zones = ref([]);
 const loading = ref(true);
 const qtys = ref([]);
+const selectedZoneIndex = ref(-1);
 const step = ref(2);
 const buyerName = ref('');
 const buyerEmail = ref('');
@@ -14,9 +15,67 @@ const promoCode = ref('');
 const promoMsg = ref('');
 const purchasing = ref(false);
 const orderResult = ref(null);
+const purchaseSnapshot = ref(null);
 const errorMsg = ref('');
+const pendingCardCheckoutKey = 'pending_card_checkout';
 
 const eventId = new URLSearchParams(window.location.search).get('event');
+
+const consumeMercadoPagoReturn = async () => {
+    const params = new URLSearchParams(window.location.search);
+    const status = params.get('status') || params.get('collection_status');
+    const paymentId = params.get('payment_id') || params.get('collection_id');
+
+    if (!status) return;
+
+    const raw = localStorage.getItem(pendingCardCheckoutKey);
+    if (!raw) return;
+
+    let payload = null;
+    try {
+        payload = JSON.parse(raw);
+    } catch {
+        localStorage.removeItem(pendingCardCheckoutKey);
+        return;
+    }
+
+    if (String(payload?.event_id) !== String(eventId)) {
+        return;
+    }
+
+    if (status !== 'approved') {
+        errorMsg.value = 'El pago con tarjeta no fue aprobado. Intenta nuevamente.';
+        localStorage.removeItem(pendingCardCheckoutKey);
+        return;
+    }
+
+    purchasing.value = true;
+    errorMsg.value = '';
+
+    try {
+        purchaseSnapshot.value = {
+            zoneName: zones.value.find((z) => z.id === payload.event_zone_id)?.name,
+            unitPrice: Number(zones.value.find((z) => z.id === payload.event_zone_id)?.price || 0),
+            holder: payload.buyer_name,
+            paidAt: new Date().toISOString(),
+        };
+
+        const { data } = await window.axios.post('/api/checkout', {
+            ...payload,
+            payment_method: 'card',
+            payment_reference: paymentId || null,
+        });
+
+        orderResult.value = data;
+        step.value = 5;
+        localStorage.removeItem(pendingCardCheckoutKey);
+        window.history.replaceState({}, document.title, `/compra?event=${eventId}`);
+    } catch (e) {
+        errorMsg.value = e.response?.data?.message || 'No se pudo finalizar la compra tras el pago con tarjeta.';
+    } finally {
+        purchasing.value = false;
+    }
+};
 
 onMounted(async () => {
     if (!eventId) { loading.value = false; return; }
@@ -25,6 +84,8 @@ onMounted(async () => {
         event.value = data;
         zones.value = data.zones || [];
         qtys.value = zones.value.map(() => 0);
+
+        await consumeMercadoPagoReturn();
     } catch (e) {
         console.error(e);
     } finally {
@@ -37,12 +98,93 @@ const fee = computed(() => Math.round(subtotal.value * 0.1));
 const total = computed(() => subtotal.value + fee.value);
 const hasItems = computed(() => qtys.value.some(q => q > 0));
 const currency = (v) => `$${Number(v).toLocaleString('es-MX')}`;
-const changeQty = (i, delta) => { qtys.value[i] = Math.max(0, Math.min(20, qtys.value[i] + delta)); };
+const selectedZone = computed(() => selectedZoneIndex.value >= 0 ? zones.value[selectedZoneIndex.value] : null);
+const selectedQty = computed(() => selectedZoneIndex.value >= 0 ? qtys.value[selectedZoneIndex.value] : 0);
+const emailDelivery = computed(() => orderResult.value?.email_delivery || null);
+
+const selectZone = (index) => {
+    selectedZoneIndex.value = index;
+    qtys.value = qtys.value.map((value, i) => (i === index ? value : 0));
+};
+
+const maxAvailable = (zone) => Math.max(0, Number(zone.capacity || 0) - Number(zone.sold_count || 0));
+
+const changeQty = (i, delta) => {
+    selectZone(i);
+    const max = Math.min(20, maxAvailable(zones.value[i] || {}));
+    qtys.value[i] = Math.max(0, Math.min(max, qtys.value[i] + delta));
+};
 
 const formatDate = (d) => {
     if (!d) return '';
     const dt = new Date(d);
     return dt.toLocaleDateString('es-MX', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }).toUpperCase();
+};
+
+const formatTicketStamp = (d) => {
+    if (!d) return '';
+    const dt = new Date(d);
+    return dt.toLocaleString('es-MX', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+    });
+};
+
+const renderedTickets = computed(() => {
+    const tickets = orderResult.value?.tickets || [];
+    if (!tickets.length) return [];
+
+    const snap = purchaseSnapshot.value || {};
+
+    return tickets.map((ticket, idx) => ({
+        code: ticket.ticket_code,
+        folio: String(idx + 1).padStart(3, '0'),
+        zone: snap.zoneName || selectedZone.value?.name || 'General',
+        holder: snap.holder || buyerName.value || 'Publico General',
+        paidAt: snap.paidAt || new Date().toISOString(),
+        unitPrice: snap.unitPrice ?? selectedZone.value?.price ?? 0,
+    }));
+});
+
+const printTickets = () => {
+    window.print();
+};
+
+const barcodeBars = (code) => {
+    const input = String(code || 'LRD');
+    const bars = [];
+
+    for (let i = 0; i < input.length; i++) {
+        const n = input.charCodeAt(i);
+        bars.push(1 + (n % 3));
+        bars.push(1);
+        bars.push(1 + ((n >> 2) % 3));
+        bars.push(1);
+    }
+
+    return bars;
+};
+
+const barcodeRects = (code) => {
+    const bars = barcodeBars(code);
+    const rects = [];
+    let x = 0;
+
+    bars.forEach((w, i) => {
+        // Paint only odd segments as black bars.
+        if (i % 2 === 0) {
+            rects.push({ x, w });
+        }
+        x += w;
+    });
+
+    return {
+        rects,
+        width: Math.max(1, x),
+    };
 };
 
 const goToStep3 = () => { if (hasItems.value) step.value = 3; };
@@ -51,20 +193,48 @@ const goToStep4 = () => { if (buyerName.value && buyerEmail.value) step.value = 
 const purchase = async () => {
     purchasing.value = true;
     errorMsg.value = '';
-    const selectedIdx = qtys.value.findIndex(q => q > 0);
+    const selectedIdx = selectedZoneIndex.value >= 0 ? selectedZoneIndex.value : qtys.value.findIndex(q => q > 0);
     if (selectedIdx === -1) return;
 
+    const checkoutPayload = {
+        event_id: event.value.id,
+        event_zone_id: zones.value[selectedIdx].id,
+        quantity: qtys.value[selectedIdx],
+        buyer_name: buyerName.value,
+        buyer_email: buyerEmail.value,
+        buyer_phone: buyerPhone.value || null,
+        payment_method: paymentMethod.value,
+        discount_code: promoCode.value || null,
+    };
+
     try {
-        const { data } = await window.axios.post('/api/checkout', {
-            event_id: event.value.id,
-            event_zone_id: zones.value[selectedIdx].id,
-            quantity: qtys.value[selectedIdx],
-            buyer_name: buyerName.value,
-            buyer_email: buyerEmail.value,
-            buyer_phone: buyerPhone.value || null,
-            payment_method: paymentMethod.value,
-            discount_code: promoCode.value || null,
-        });
+        purchaseSnapshot.value = {
+            zoneName: zones.value[selectedIdx]?.name,
+            unitPrice: Number(zones.value[selectedIdx]?.price || 0),
+            holder: buyerName.value,
+            paidAt: new Date().toISOString(),
+        };
+
+        if (paymentMethod.value === 'card') {
+            const successUrl = `${window.location.origin}/compra?event=${event.value.id}`;
+            localStorage.setItem(pendingCardCheckoutKey, JSON.stringify(checkoutPayload));
+
+            const { data } = await window.axios.post('/api/checkout/mercadopago/preference', {
+                ...checkoutPayload,
+                success_url: successUrl,
+                failure_url: successUrl,
+                pending_url: successUrl,
+            });
+
+            if (!data?.redirect_url) {
+                throw new Error('Mercado Pago no devolvió URL de pago.');
+            }
+
+            window.location.href = data.redirect_url;
+            return;
+        }
+
+        const { data } = await window.axios.post('/api/checkout', checkoutPayload);
         orderResult.value = data;
         step.value = 5;
     } catch (e) {
@@ -77,7 +247,7 @@ const purchase = async () => {
 
 <template>
     <nav class="topbar">
-        <a href="/" class="topbar-brand">Chárro<span>Tickets</span></a>
+        <a href="/" class="topbar-brand">Marca <span>MGR</span></a>
         <div class="topbar-nav">
             <a href="/">Inicio</a>
             <a href="/vendedor">Iniciar sesion</a>
@@ -109,13 +279,22 @@ const purchase = async () => {
         </div>
 
         <!-- STEP 5: Confirmación -->
-        <div v-if="step === 5" style="padding:60px 40px;text-align:center;">
-            <div style="font-size:72px;margin-bottom:16px;">✅</div>
-            <div class="section-title" style="margin-bottom:8px;">¡Compra Exitosa!</div>
-            <div style="font-family:'DM Mono',monospace;font-size:12px;color:var(--gris);margin-bottom:24px;">
-                Tu orden ha sido procesada. Se enviará la confirmación a <b style="color:var(--dorado-claro);">{{ buyerEmail }}</b>
+        <div v-if="step === 5" class="ticket-confirmation" style="padding:60px 40px;text-align:center;">
+            <div class="screen-only" style="font-size:72px;margin-bottom:16px;">✅</div>
+            <div class="section-title screen-only" style="margin-bottom:8px;">¡Compra Exitosa!</div>
+            <div class="screen-only" style="font-family:'DM Mono',monospace;font-size:12px;color:var(--gris);margin-bottom:24px;">
+                Tu orden ha sido procesada.
+                <template v-if="emailDelivery?.sent">
+                    Los boletos fueron enviados a <b style="color:var(--dorado-claro);">{{ buyerEmail }}</b>.
+                </template>
+                <template v-else-if="emailDelivery?.message">
+                    {{ emailDelivery.message }}
+                </template>
+                <template v-else>
+                    Puedes descargar tus PDFs desde esta misma confirmación.
+                </template>
             </div>
-            <div v-if="orderResult" style="background:#1A0800;border:1px solid rgba(200,146,42,0.3);padding:20px;max-width:500px;margin:0 auto;text-align:left;">
+            <div v-if="orderResult" class="screen-only" style="background:#1A0800;border:1px solid rgba(200,146,42,0.3);padding:20px;max-width:500px;margin:0 auto 20px;text-align:left;">
                 <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--dorado);letter-spacing:2px;margin-bottom:12px;">DETALLE DE ORDEN</div>
                 <div style="font-size:13px;margin-bottom:6px;">Orden: <b style="color:var(--dorado-claro);">#{{ orderResult.order?.id }}</b></div>
                 <div style="font-size:13px;margin-bottom:6px;">Total: <b style="color:var(--dorado-claro);">{{ currency(orderResult.order?.total || 0) }}</b></div>
@@ -125,7 +304,48 @@ const purchase = async () => {
                     <a :href="`/api/tickets/${t.ticket_code}/pdf`" target="_blank" style="color:var(--dorado);margin-left:12px;">⬇ PDF</a>
                 </div>
             </div>
-            <a href="/" style="display:inline-block;margin-top:24px;padding:12px 24px;background:var(--rojo);color:var(--crema);font-family:'DM Mono',monospace;font-size:11px;letter-spacing:2px;text-decoration:none;">← VOLVER AL INICIO</a>
+
+            <div v-if="renderedTickets.length" class="ticket-list-wrap">
+                <div v-for="ticket in renderedTickets" :key="ticket.code" class="purchase-ticket-card">
+                    <div class="purchase-ticket-brand">Marca MGR</div>
+                    <div class="purchase-ticket-event">{{ event.name }}</div>
+                    <div class="purchase-ticket-meta">📅 {{ formatDate(event.starts_at) }}</div>
+                    <div class="purchase-ticket-meta">📍 {{ event.venue }}, {{ event.city }}</div>
+
+                    <div class="purchase-ticket-grid">
+                        <div class="label">BOLETO</div><div class="val">#{{ ticket.folio }}</div>
+                        <div class="label">ZONA</div><div class="val">{{ ticket.zone }}</div>
+                        <div class="label">PRECIO</div><div class="val">{{ currency(ticket.unitPrice) }} MXN</div>
+                        <div class="label">TITULAR</div><div class="val">{{ ticket.holder }}</div>
+                        <div class="label">COMPRA</div><div class="val">{{ formatTicketStamp(ticket.paidAt) }}</div>
+                    </div>
+
+                    <div class="purchase-ticket-barcode" aria-hidden="true">
+                        <svg
+                            class="barcode-svg"
+                            :viewBox="`0 0 ${barcodeRects(ticket.code).width} 56`"
+                            preserveAspectRatio="none"
+                        >
+                            <rect x="0" y="0" :width="barcodeRects(ticket.code).width" height="56" fill="#fff" />
+                            <rect
+                                v-for="(rect, i) in barcodeRects(ticket.code).rects"
+                                :key="`${ticket.code}-r-${i}`"
+                                :x="rect.x"
+                                y="0"
+                                :width="rect.w"
+                                height="56"
+                                fill="#000"
+                            />
+                        </svg>
+                    </div>
+                    <div class="purchase-ticket-code">{{ ticket.code }}</div>
+                </div>
+            </div>
+
+            <div class="ticket-actions screen-only">
+                <button class="btn-outline" @click="printTickets">Imprimir Tickets</button>
+                <a class="btn-home" href="/">← Volver al Inicio</a>
+            </div>
         </div>
 
         <!-- STEP 2-4: Main layout -->
@@ -137,22 +357,47 @@ const purchase = async () => {
                     <div class="zone-map">
                         <div class="zone-map-title">Zonas disponibles para este evento</div>
                         <div class="lienzo-diagram">
-                            <div v-for="zone in zones" :key="zone.id" class="lienzo-row">
-                                <div class="lienzo-zone vip" style="width:340px;">{{ zone.name }} · {{ zone.capacity - zone.sold_count }} disponibles</div>
+                            <div v-for="(zone, i) in zones" :key="zone.id" class="lienzo-row">
+                                <button class="lienzo-zone vip" style="width:340px;"
+                                    :class="{ selected: selectedZoneIndex === i }"
+                                    @click="selectZone(i)">
+                                    {{ zone.name }} · {{ maxAvailable(zone) }} disponibles
+                                </button>
                             </div>
                             <div class="lienzo-row"><div class="lienzo-arena">🐎 ARENA — LIENZO CHARRO 🐎</div></div>
                         </div>
                     </div>
 
+                    <div class="ticket-selector">
+                        <div class="ticket-selector-title">Apartado de Seleccion de Boletos</div>
+                        <div v-if="zones.length === 0" class="ticket-selector-empty">
+                            No hay zonas configuradas para este evento.
+                        </div>
+                        <div v-else-if="selectedZoneIndex < 0" class="ticket-selector-empty">
+                            Elige una zona para habilitar la seleccion de boletos.
+                        </div>
+                        <div v-else class="ticket-selector-content">
+                            <div class="ticket-chip">Zona: <b>{{ selectedZone?.name }}</b></div>
+                            <div class="ticket-chip">Disponibles: <b>{{ maxAvailable(selectedZone || {}) }}</b></div>
+                            <div class="ticket-chip">Precio: <b>{{ currency(selectedZone?.price || 0) }}</b></div>
+
+                            <div class="ticket-counter">
+                                <button class="qty-btn" @click="changeQty(selectedZoneIndex, -1)">−</button>
+                                <div class="ticket-counter-value">{{ selectedQty }}</div>
+                                <button class="qty-btn" @click="changeQty(selectedZoneIndex, 1)">+</button>
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="section-title" style="margin-bottom: 16px;">Selecciona tus Boletos</div>
                     <div class="seat-categories">
-                        <div v-for="(zone, i) in zones" :key="zone.id" :class="['seat-cat', qtys[i] > 0 ? 'selected' : '']">
+                        <div v-for="(zone, i) in zones" :key="zone.id" :class="['seat-cat', qtys[i] > 0 ? 'selected' : '', selectedZoneIndex === i ? 'active-zone' : '']" @click="selectZone(i)">
                             <div class="seat-cat-info">
                                 <div class="seat-dot" :style="{ background: ['var(--dorado)', '#FF6B6B', '#6BFFAA', 'var(--gris)'][i % 4] }"></div>
                                 <div>
                                     <div class="seat-name">{{ zone.name }}</div>
                                     <div class="seat-desc">Capacidad: {{ zone.capacity }}</div>
-                                    <div class="seat-avail">✓ {{ zone.capacity - zone.sold_count }} lugares disponibles</div>
+                                    <div class="seat-avail">✓ {{ maxAvailable(zone) }} lugares disponibles</div>
                                 </div>
                             </div>
                             <div class="seat-right">
@@ -202,7 +447,7 @@ const purchase = async () => {
                 <template v-if="step === 4">
                     <div class="section-title" style="margin-bottom:20px;">Método de Pago</div>
                     <div style="max-width:500px;display:flex;flex-direction:column;gap:12px;">
-                        <label v-for="m in [{v:'card', l:'💳 Tarjeta de crédito/débito'}, {v:'oxxo', l:'🏪 OXXO (efectivo)'}, {v:'transfer', l:'🏦 Transferencia bancaria'}]" :key="m.v"
+                        <label v-for="m in [{v:'card', l:'💳 Tarjeta de crédito/débito'}, {v:'oxxo', l:'💵 Efectivo'}, {v:'transfer', l:'🏦 Transferencia bancaria'}]" :key="m.v"
                             :style="{display:'flex',alignItems:'center',gap:'12px',padding:'14px 16px',border:'1px solid ' + (paymentMethod === m.v ? 'var(--dorado-claro)' : 'rgba(200,146,42,0.2)'),background: paymentMethod === m.v ? 'rgba(240,192,96,0.08)' : 'rgba(0,0,0,0.2)',cursor:'pointer'}">
                             <input type="radio" :value="m.v" v-model="paymentMethod" style="accent-color:var(--dorado);">
                             <span style="font-family:'DM Mono',monospace;font-size:12px;color:var(--crema);">{{ m.l }}</span>
@@ -302,11 +547,20 @@ body { font-family: 'Libre Baskerville', serif; background: var(--cafe); color: 
 .lienzo-zone.premium { background: rgba(139,26,26,0.15); border-color: var(--rojo); color: #FF6B6B; }
 .lienzo-zone.general { background: rgba(26,74,46,0.15); border-color: var(--verde); color: #6BFFAA; }
 .lienzo-zone:hover { transform: scale(1.03); }
+.lienzo-zone.selected { border-color: var(--dorado-claro); box-shadow: 0 0 0 1px var(--dorado-claro) inset; }
 .lienzo-arena { padding: 16px 40px; background: rgba(200,146,42,0.05); border: 1px dashed rgba(200,146,42,0.2); font-family: 'DM Mono', monospace; font-size: 10px; color: var(--gris); letter-spacing: 2px; text-transform: uppercase; }
+.ticket-selector { border: 1px solid rgba(200,146,42,0.25); background: rgba(0,0,0,0.25); padding: 14px; margin-bottom: 22px; }
+.ticket-selector-title { font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: var(--dorado); margin-bottom: 10px; }
+.ticket-selector-empty { font-family: 'DM Mono', monospace; font-size: 11px; color: var(--gris); }
+.ticket-selector-content { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.ticket-chip { font-family: 'DM Mono', monospace; font-size: 10px; color: var(--crema); border: 1px dashed rgba(200,146,42,0.3); padding: 6px 10px; }
+.ticket-counter { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.ticket-counter-value { min-width: 36px; text-align: center; font-family: 'Playfair Display', serif; font-size: 24px; color: var(--dorado-claro); }
 .seat-categories { display: flex; flex-direction: column; gap: 12px; }
 .seat-cat { display: flex; align-items: center; justify-content: space-between; padding: 16px 18px; border: 1px solid rgba(200,146,42,0.2); background: rgba(0,0,0,0.2); transition: all 0.2s; cursor: pointer; }
 .seat-cat:hover { border-color: var(--dorado); background: rgba(200,146,42,0.05); }
 .seat-cat.selected { border-color: var(--dorado-claro); background: rgba(240,192,96,0.08); }
+.seat-cat.active-zone { box-shadow: 0 0 0 1px rgba(240,192,96,0.3) inset; }
 .seat-cat-info { display: flex; align-items: center; gap: 14px; }
 .seat-dot { width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0; }
 .seat-name { font-family: 'Playfair Display', serif; font-size: 17px; color: var(--crema); }
@@ -346,9 +600,98 @@ body { font-family: 'Libre Baskerville', serif; background: var(--cafe); color: 
 .secure-badge { margin-top: 14px; text-align: center; font-family: 'DM Mono', monospace; font-size: 9px; color: var(--gris); letter-spacing: 1px; line-height: 1.8; }
 .payment-icons { display: flex; justify-content: center; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
 .pay-icon { padding: 4px 10px; border: 1px solid rgba(200,146,42,0.2); font-family: 'DM Mono', monospace; font-size: 9px; color: var(--gris); }
+.ticket-list-wrap { display: flex; justify-content: center; flex-wrap: wrap; gap: 20px; margin: 10px 0 0; }
+.purchase-ticket-card { width: 340px; border: 2px solid var(--dorado); border-radius: 10px; padding: 16px; text-align: left; background: linear-gradient(180deg, #2e0f00 0%, #1a0800 100%); box-shadow: inset 0 0 0 1px rgba(240,192,96,0.15); }
+.purchase-ticket-brand { font-family: 'Playfair Display', serif; font-size: 36px; line-height: 1; color: var(--dorado-claro); margin-bottom: 10px; }
+.purchase-ticket-event { font-family: 'Playfair Display', serif; font-size: 28px; color: var(--crema); margin-bottom: 6px; }
+.purchase-ticket-meta { font-family: 'DM Mono', monospace; font-size: 10px; color: var(--gris); letter-spacing: 1px; margin-bottom: 4px; }
+.purchase-ticket-grid { margin: 14px 0; border-top: 1px dashed rgba(200,146,42,0.35); border-bottom: 1px dashed rgba(200,146,42,0.35); padding: 10px 0; display: grid; grid-template-columns: 1fr auto; row-gap: 8px; column-gap: 14px; }
+.purchase-ticket-grid .label { font-family: 'DM Mono', monospace; font-size: 10px; color: var(--gris); letter-spacing: 1px; }
+.purchase-ticket-grid .val { font-family: 'Playfair Display', serif; font-size: 20px; color: var(--crema); text-align: right; }
+.purchase-ticket-barcode { height: 56px; border-radius: 4px; border: 6px solid #fff; margin-top: 10px; background: #fff; overflow: hidden; }
+.barcode-svg { width: 100%; height: 100%; display: block; shape-rendering: crispEdges; }
+.purchase-ticket-code { text-align: center; margin-top: 8px; font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 2px; color: var(--dorado-claro); }
+.ticket-actions { margin-top: 14px; display: flex; justify-content: center; align-items: center; gap: 10px; flex-wrap: wrap; }
+.btn-home { display: inline-block; padding: 12px 24px; background: var(--rojo); color: var(--crema); font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 2px; text-decoration: none; text-transform: uppercase; }
 @media (max-width: 768px) {
   .buy-layout { grid-template-columns: 1fr; }
   .buy-sidebar { border-left: none; border-top: 1px solid rgba(200,146,42,0.3); }
   .event-banner { flex-wrap: wrap; }
+    .purchase-ticket-card { width: 100%; max-width: 380px; }
+    .ticket-actions { flex-direction: column; }
+}
+
+@media print {
+    @page { margin: 8mm; }
+
+    * {
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+    }
+
+    html,
+    body {
+        background: #fff !important;
+        min-height: auto !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+
+    .topbar,
+    .page-label,
+    .event-banner,
+    .stepper,
+    .buy-layout,
+    .screen-only,
+    .ticket-actions {
+        display: none !important;
+    }
+
+    .ticket-confirmation {
+        padding: 0 !important;
+        margin: 0 !important;
+        text-align: left !important;
+    }
+
+    .ticket-list-wrap {
+        position: static !important;
+        width: 100% !important;
+        display: flex !important;
+        gap: 12px;
+        justify-content: flex-start;
+        align-items: flex-start;
+        flex-wrap: wrap;
+        background: #fff !important;
+        padding: 0 !important;
+        margin: 0 !important;
+    }
+
+    .purchase-ticket-card {
+        width: 86mm;
+        min-height: 145mm;
+        border: 1px solid #000;
+        border-radius: 0;
+        background: #fff;
+        box-shadow: none;
+        color: #000;
+        break-inside: avoid;
+        page-break-inside: avoid;
+    }
+
+    .purchase-ticket-brand,
+    .purchase-ticket-event,
+    .purchase-ticket-grid .val,
+    .purchase-ticket-code {
+        color: #000;
+    }
+
+    .purchase-ticket-meta,
+    .purchase-ticket-grid .label {
+        color: #333;
+    }
+
+    .purchase-ticket-barcode {
+        border-color: #000;
+    }
 }
 </style>

@@ -12,8 +12,11 @@ class TicketController extends Controller
     public function show(string $code): JsonResponse
     {
         $ticket = Ticket::query()
-            ->with('event', 'zone', 'order', 'item')
-            ->where('ticket_code', $code)
+            ->with(['event', 'order', 'item'])
+            ->where(function ($query) use ($code) {
+                $query->where('codigo_qr', $code)
+                    ->orWhere('codigo_barras', $code);
+            })
             ->firstOrFail();
 
         return response()->json($ticket);
@@ -22,8 +25,11 @@ class TicketController extends Controller
     public function downloadPdf(string $code)
     {
         $ticket = Ticket::query()
-            ->with('event', 'zone', 'order', 'item')
-            ->where('ticket_code', $code)
+            ->with(['event', 'order', 'item'])
+            ->where(function ($query) use ($code) {
+                $query->where('codigo_qr', $code)
+                    ->orWhere('codigo_barras', $code);
+            })
             ->firstOrFail();
 
         $pdf = Pdf::loadView('tickets.pdf', ['ticket' => $ticket]);
