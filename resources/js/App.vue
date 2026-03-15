@@ -163,8 +163,8 @@ body { font-family: 'Libre Baskerville', serif; background: var(--cafe); color: 
 .topbar-brand span { color: var(--dorado-claro); }
 .topbar-nav { display: flex; gap: 4px; }
 .topbar-nav a { padding: 7px 14px; font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: rgba(245,239,224,0.6); text-decoration: none; transition: color 0.2s; border-bottom: 2px solid transparent; }
-.topbar-nav a:hover, .topbar-nav a.active { color: var(--dorado-claro); border-bottom-color: var(--dorado-claro); }
-.page-label { background: var(--bg); padding: 8px 32px; font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 3px; text-transform: uppercase; color: var(--gris); border-bottom: 1px solid rgba(200,146,42,0.2); }
+.topbar-nav a:hover, .topbar-nav a.active { color:white; border-bottom-color: rgb(255, 233, 31); }
+.page-label { background: var(--bg); padding: 8px 32px; font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 3px; text-transform: uppercase; color: white; border-bottom: 1px solid rgba(236, 169, 44, 0.2); }
 
 .hero {
     background: linear-gradient(160deg, #1A0800 0%, #3D1200 50%, #1A0800 100%);
@@ -196,7 +196,7 @@ body { font-family: 'Libre Baskerville', serif; background: var(--cafe); color: 
     line-height: 1.05; margin-bottom: 14px; position: relative;
 }
 .hero-title span { color: var(--dorado-claro); }
-.hero-sub { font-size: 15px; color: var(--gris); margin-bottom: 40px; letter-spacing: 1px; position: relative; }
+.hero-sub { font-size: 15px; color: rgb(230, 213, 213); margin-bottom: 40px; letter-spacing: 1px; position: relative; }
 
 .search-bar {
     display: flex; max-width: 620px; margin: 0 auto 24px;
@@ -207,10 +207,10 @@ body { font-family: 'Libre Baskerville', serif; background: var(--cafe); color: 
     padding: 14px 20px; color: var(--crema);
     font-family: 'Libre Baskerville', serif; font-size: 14px; outline: none;
 }
-.search-bar input::placeholder { color: var(--gris); }
+.search-bar input::placeholder { color: rgb(182, 214, 173); }
 .search-bar button {
     background: var(--dorado); border: none; padding: 14px 28px;
-    color: var(--cafe); font-family: 'DM Mono', monospace;
+    color: rgb(220, 253, 255); font-family: 'DM Mono', monospace;
     font-size: 11px; letter-spacing: 2px; cursor: pointer;
     font-weight: 500; text-transform: uppercase;
 }
@@ -309,5 +309,5 @@ body { font-family: 'Libre Baskerville', serif; background: var(--cafe); color: 
 .site-footer { background: #100400; border-top: 1px solid rgba(200,146,42,0.2); padding: 32px 40px; display: flex; justify-content: space-between; align-items: center; margin-top: 48px; }
 .footer-brand { font-family: 'Playfair Display', serif; font-size: 18px; color: var(--crema); }
 .footer-brand span { color: var(--dorado-claro); }
-.footer-text { font-family: 'DM Mono', monospace; font-size: 10px; color: var(--gris); letter-spacing: 1px; }
+.footer-text { font-family: 'DM Mono', monospace; font-size: 10px; color: white; letter-spacing: 1px;}
 </style>
