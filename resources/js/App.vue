@@ -69,7 +69,7 @@ const currency = (v) => `$${Number(v).toLocaleString('es-MX')}`;
             <a href="/" class="active">Inicio</a>
         </div>
     </nav>
-    <div class="page-label">Portal Público — Eventos en vivo</div>
+    <div class="page-label">Portal Público — Eventos en vivo <div class="live-indicator"></div></div>
 
     <section class="hero">
         <div class="hero-badge">Plataforma Oficial de Charreada · México</div>
@@ -354,4 +354,74 @@ body { font-family: 'Libre Baskerville', serif; background: var(--cafe); color: 
 .footer-brand { font-family: 'Playfair Display', serif; font-size: 18px; color: var(--crema); }
 .footer-brand span { color: var(--dorado-claro); }
 .footer-text { font-family: 'DM Mono', monospace; font-size: 10px; color: white; letter-spacing: 1px;}
+.page-label{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  font-weight:600;
+  font-family:system-ui, Arial, sans-serif;
+}
+
+
+.live-indicator{
+  position:relative;
+  width:10px;
+  height:10px;
+  border-radius:50%;
+  background:#ff2b2b;
+  box-shadow:
+    0 0 6px rgba(255,0,0,0.8),
+    0 0 12px rgba(255,0,0,0.6),
+    0 0 18px rgba(255,0,0,0.4);
+    
+  animation: livePulse 1.6s infinite ease-in-out;
+}
+
+.live-indicator::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  border-radius:50%;
+  background:rgba(255,0,0,0.6);
+  animation: liveWave 1.6s infinite;
+}
+
+.live-indicator::after{
+  content:"";
+  position:absolute;
+  inset:0;
+  border-radius:50%;
+  background:rgba(255,0,0,0.4);
+  animation: liveWave 1.6s infinite 0.8s;
+}
+
+@keyframes livePulse{
+  0%{
+    transform:scale(1);
+    filter:brightness(1);
+  }
+  50%{
+    transform:scale(1.15);
+    filter:brightness(1.4);
+  }
+  100%{
+    transform:scale(1);
+    filter:brightness(1);
+  }
+}
+
+@keyframes liveWave{
+  0%{
+    transform:scale(1);
+    opacity:0.7;
+  }
+  70%{
+    transform:scale(3);
+    opacity:0;
+  }
+  100%{
+    transform:scale(3);
+    opacity:0;
+  }
+}
 </style>
