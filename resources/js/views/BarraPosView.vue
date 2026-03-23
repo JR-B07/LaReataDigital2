@@ -1249,13 +1249,18 @@ onMounted(async () => {
     margin: 0;
     min-height: 100vh;
     font-family: 'Libre Baskerville', serif;
-    background: radial-gradient(circle at top, #4d180a, #170703 65%);
+    background:
+        radial-gradient(circle at 20% 20%, rgba(217,164,65,0.06), transparent 45%),
+        radial-gradient(circle at 80% 60%, rgba(139,26,26,0.10), transparent 45%),
+        #140700;
     color: #f5efe0;
 }
 
 .topbar {
-    background: #8b1a1a;
-    padding: 12px 24px;
+    background: rgba(139,26,26,0.55);
+    backdrop-filter: blur(18px);
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    padding: 14px 32px;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -1265,31 +1270,40 @@ onMounted(async () => {
     color: #f5efe0;
     text-decoration: none;
     font-family: 'Playfair Display', serif;
-    font-size: 24px;
+    font-size: 22px;
+    font-weight: 900;
 }
 
-.topbar-brand span { color: #f0c060; }
+.topbar-brand span { color: #F6C56F; }
 
-.topbar-nav { display: flex; gap: 14px; }
+.topbar-nav { display: flex; gap: 6px; }
 .topbar-nav a {
-    color: rgba(245, 239, 224, 0.75);
+    color: rgb(245, 239, 224);
     text-decoration: none;
-    font-family: 'DM Mono', monospace;
-    font-size: 11px;
-    letter-spacing: 2px;
-    text-transform: uppercase;
-}
-.topbar-nav a.active, .topbar-nav a:hover { color: #f0c060; }
-
-.page-label {
-    background: #1e0b03;
-    border-bottom: 1px solid rgba(240, 192, 96, 0.2);
-    padding: 8px 24px;
     font-family: 'DM Mono', monospace;
     font-size: 10px;
     letter-spacing: 2px;
     text-transform: uppercase;
-    color: #c8922a;
+    padding: 8px 16px;
+    border-radius: 10px;
+    transition: all .3s ease;
+}
+.topbar-nav a.active { color: white; background: rgb(199,12,12); backdrop-filter: blur(6px); box-shadow: 0 0 0 1px rgba(246,197,111,0.25) inset, 0 4px 14px rgba(0,0,0,0.4); }
+.topbar-nav a:hover { color: white; background: rgba(0,0,0,0.74); backdrop-filter: blur(6px); box-shadow: 0 0 0 1px rgba(246,197,111,0.25) inset, 0 4px 14px rgba(0,0,0,0.4); }
+
+.page-label {
+    background: rgba(0,0,0,0.35);
+    backdrop-filter: blur(14px);
+    border-bottom: 1px solid rgba(217,164,65,0.15);
+    padding: 10px 32px;
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: #7A6F63;
+    display: flex;
+    align-items: center;
+    gap: 10px;
 }
 
 .login-wrap {

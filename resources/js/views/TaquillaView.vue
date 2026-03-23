@@ -421,8 +421,9 @@ onMounted(async () => {
     margin: 0;
     min-height: 100vh;
     background:
-        radial-gradient(circle at top left, rgba(200, 146, 42, 0.16), transparent 32%),
-        linear-gradient(135deg, #120701 0%, #251105 46%, #4a1d08 100%);
+        radial-gradient(circle at 20% 20%, rgba(217,164,65,0.06), transparent 45%),
+        radial-gradient(circle at 80% 60%, rgba(139,26,26,0.10), transparent 45%),
+        #140700;
     color: #f5efe0;
     font-family: 'Libre Baskerville', serif;
 }
@@ -437,8 +438,9 @@ onMounted(async () => {
 
 .taquilla-aside {
     padding: 56px 40px;
-    background: rgba(17, 7, 1, 0.86);
-    border-right: 1px solid rgba(240, 192, 96, 0.18);
+    background: rgba(139,26,26,0.35);
+    backdrop-filter: blur(18px);
+    border-right: 1px solid rgba(255,255,255,0.06);
     display: flex;
     flex-direction: column;
     gap: 22px;
@@ -623,8 +625,9 @@ onMounted(async () => {
     align-items: center;
     gap: 16px;
     padding: 12px 24px;
-    background: rgba(17, 7, 1, 0.9);
-    border-bottom: 1px solid rgba(240, 192, 96, 0.18);
+    background: rgba(139,26,26,0.55);
+    backdrop-filter: blur(18px);
+    border-bottom: 1px solid rgba(255,255,255,0.06);
 }
 
 .pos-brand {
@@ -652,11 +655,21 @@ onMounted(async () => {
 
 .pos-link {
     font-family: 'DM Mono', monospace;
-    color: #f0c060;
+    color: rgb(245, 239, 224);
     text-decoration: none;
     font-size: 11px;
     letter-spacing: 1px;
     text-transform: uppercase;
+    padding: 8px 16px;
+    border-radius: 10px;
+    transition: all .3s ease;
+}
+
+.pos-link:hover {
+    color: white;
+    background: rgba(0, 0, 0, 0.74);
+    backdrop-filter: blur(6px);
+    box-shadow: 0 0 0 1px rgba(246,197,111,0.25) inset, 0 4px 14px rgba(0,0,0,0.4);
 }
 
 .pos-logout {
@@ -664,12 +677,20 @@ onMounted(async () => {
     background: transparent;
     border: 1px solid rgba(240, 192, 96, 0.3);
     color: #f5efe0;
-    padding: 6px 12px;
+    padding: 8px 16px;
     font-size: 11px;
     cursor: pointer;
     letter-spacing: 1px;
     text-transform: uppercase;
-    border-radius: 4px;
+    border-radius: 10px;
+    transition: all .3s ease;
+}
+
+.pos-logout:hover {
+    color: white;
+    background: rgba(0, 0, 0, 0.74);
+    backdrop-filter: blur(6px);
+    box-shadow: 0 0 0 1px rgba(246,197,111,0.25) inset, 0 4px 14px rgba(0,0,0,0.4);
 }
 
 .pos-loading {

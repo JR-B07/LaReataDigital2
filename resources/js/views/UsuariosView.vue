@@ -300,19 +300,20 @@ const onRoleFilter = () => loadUsers();
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=Libre+Baskerville:wght@400;700&family=DM+Mono:wght@400;500&display=swap');
 :root {
-  --rojo: #8B1A1A; --dorado: #C8922A; --dorado-claro: #F0C060;
-  --crema: #F5EFE0; --cafe: #3D2008; --verde: #1A4A2E;
-  --gris: #6B6055; --blanco: #FDFAF4; --bg: #2A1504;
+  --rojo:#8B1A1A; --dorado:#C8922A; --dorado-strong:#D9A441;
+  --dorado-claro:#F6C56F; --miel:#E2A85C; --crema:#F5EFE0; --cafe:#2B1606;
+  --cafe-glass:rgba(43,22,6,0.55); --verde:#1A4A2E; --gris:#7A6F63; --blanco:#FDFAF4; --bg:#140700;
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: 'Libre Baskerville', serif; background: var(--cafe); color: var(--crema); min-height: 100vh; }
-.topbar { background: var(--rojo); padding: 12px 32px; display: flex; align-items: center; justify-content: space-between; }
-.topbar-brand { font-family: 'Playfair Display', serif; font-size: 22px; font-weight: 900; color: var(--crema); text-decoration: none; }
-.topbar-brand span { color: var(--dorado-claro); }
-.topbar-nav { display: flex; gap: 4px; }
-.topbar-nav a { padding: 7px 14px; font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: rgba(245,239,224,0.6); text-decoration: none; transition: color 0.2s; border-bottom: 2px solid transparent; }
-.topbar-nav a:hover, .topbar-nav a.active { color: var(--dorado-claro); border-bottom-color: var(--dorado-claro); }
-.page-label { background: var(--bg); padding: 8px 32px; font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 3px; text-transform: uppercase; color: var(--gris); border-bottom: 1px solid rgba(200,146,42,0.2); }
+body { font-family: 'Libre Baskerville', serif; background: radial-gradient(circle at 20% 20%,rgba(217,164,65,0.06),transparent 45%), radial-gradient(circle at 80% 60%,rgba(139,26,26,0.10),transparent 45%), var(--bg); color: var(--crema); min-height: 100vh; }
+.topbar { background:rgba(139,26,26,0.55); backdrop-filter:blur(18px); border-bottom:1px solid rgba(255,255,255,0.06); padding:14px 32px; display:flex; justify-content:space-between; align-items:center; }
+.topbar-brand { font-family:'Playfair Display',serif; font-size:22px; font-weight:900; color:var(--crema); text-decoration:none; }
+.topbar-brand span { color:var(--dorado-claro); }
+.topbar-nav { display:flex; gap:6px; }
+.topbar-nav a { padding:8px 16px; font-family:'DM Mono',monospace; font-size:10px; letter-spacing:2px; text-transform:uppercase; color:rgb(245,239,224); text-decoration:none; border-radius:10px; transition:all .3s ease; }
+.topbar-nav a.active { color:white; background:rgb(199,12,12); backdrop-filter:blur(6px); box-shadow:0 0 0 1px rgba(246,197,111,0.25) inset,0 4px 14px rgba(0,0,0,0.4); }
+.topbar-nav a:hover { color:white; background:rgba(0,0,0,0.74); backdrop-filter:blur(6px); box-shadow:0 0 0 1px rgba(246,197,111,0.25) inset,0 4px 14px rgba(0,0,0,0.4); }
+.page-label { background:rgba(0,0,0,0.35); backdrop-filter:blur(14px); padding:10px 32px; font-family:'DM Mono',monospace; font-size:10px; letter-spacing:3px; text-transform:uppercase; display:flex; align-items:center; gap:10px; border-bottom:1px solid rgba(217,164,65,0.15); color:var(--gris); }
 
 .admin-layout { display: grid; grid-template-columns: 230px 1fr; min-height: calc(100vh - 82px); }
 .admin-sidebar { background: #100400; border-right: 1px solid rgba(200,146,42,0.2); padding-top: 8px; }

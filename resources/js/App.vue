@@ -474,6 +474,20 @@ padding:5px 12px;
 border-radius:6px;
 }
 
+.card-sold-badge{
+position:absolute;
+top:12px;
+left:12px;
+background:rgba(139,26,26,0.85);
+backdrop-filter:blur(6px);
+color:white;
+font-family:'DM Mono',monospace;
+font-size:10px;
+padding:5px 12px;
+border-radius:6px;
+letter-spacing:2px;
+}
+
 .card-body{padding:22px}
 
 .card-location{
@@ -529,6 +543,117 @@ transform:translateY(-2px);
 box-shadow:0 8px 20px rgba(0,0,0,0.5);
 }
 
+.featured-card{
+background:var(--cafe-glass);
+backdrop-filter:blur(18px);
+border:1px solid rgba(255,255,255,0.08);
+border-radius:18px;
+padding:32px;
+display:flex;
+justify-content:space-between;
+align-items:flex-start;
+gap:24px;
+transition:.35s;
+}
+
+.featured-card:hover{
+border-color:rgba(246,197,111,0.35);
+box-shadow:0 25px 50px rgba(0,0,0,0.6);
+}
+
+.featured-title{
+font-family:'Playfair Display',serif;
+font-size:26px;
+font-weight:900;
+margin-bottom:10px;
+}
+
+.featured-meta{
+font-family:'DM Mono',monospace;
+font-size:11px;
+letter-spacing:1px;
+color:var(--gris);
+}
+
+.featured-tags{
+display:flex;
+flex-wrap:wrap;
+gap:8px;
+margin-top:14px;
+}
+
+.tag{
+padding:5px 14px;
+border-radius:999px;
+background:rgba(217,164,65,0.08);
+border:1px solid rgba(217,164,65,0.2);
+font-family:'DM Mono',monospace;
+font-size:10px;
+letter-spacing:1px;
+text-transform:uppercase;
+color:var(--miel);
+}
+
+.featured-price{
+text-align:right;
+flex-shrink:0;
+}
+
+.featured-price-val{
+display:block;
+font-family:'Playfair Display',serif;
+font-size:32px;
+color:var(--dorado-claro);
+}
+
+.featured-price-label{
+font-family:'DM Mono',monospace;
+font-size:10px;
+letter-spacing:2px;
+color:var(--gris);
+text-transform:uppercase;
+}
+
+.capacity-bar-wrap{
+margin-top:18px;
+}
+
+.capacity-label{
+display:flex;
+justify-content:space-between;
+font-family:'DM Mono',monospace;
+font-size:10px;
+letter-spacing:1px;
+color:var(--gris);
+margin-bottom:6px;
+}
+
+.capacity-bar{
+height:6px;
+background:rgba(255,255,255,0.08);
+border-radius:3px;
+overflow:hidden;
+}
+
+.capacity-fill{
+height:100%;
+background:linear-gradient(90deg,var(--dorado-strong),var(--miel));
+border-radius:3px;
+transition:width .5s ease;
+}
+
+.btn-agotado{
+background:rgba(255,255,255,0.08);
+border:1px solid rgba(255,255,255,0.12);
+padding:10px 18px;
+color:var(--gris);
+font-family:'DM Mono',monospace;
+font-size:10px;
+letter-spacing:2px;
+border-radius:10px;
+cursor:default;
+}
+
 .site-footer{
 background:rgba(0,0,0,0.5);
 backdrop-filter:blur(16px);
@@ -546,11 +671,32 @@ font-size:18px;
 
 .footer-brand span{color:var(--miel)}
 
+.footer-meta{
+display:flex;
+flex-direction:column;
+align-items:flex-end;
+gap:6px;
+}
+
 .footer-text{
 font-family:'DM Mono',monospace;
 font-size:10px;
 letter-spacing:1px;
 color:rgba(255,255,255,0.55);
+}
+
+.footer-access{
+font-family:'DM Mono',monospace;
+font-size:10px;
+letter-spacing:2px;
+text-transform:uppercase;
+color:var(--miel);
+text-decoration:none;
+transition:.3s;
+}
+
+.footer-access:hover{
+color:var(--dorado-claro);
 }
 
 .live-indicator{
