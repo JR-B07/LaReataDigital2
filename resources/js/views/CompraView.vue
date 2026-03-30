@@ -71,7 +71,11 @@ const consumeMercadoPagoReturn = async () => {
         localStorage.removeItem(pendingCardCheckoutKey);
         window.history.replaceState({}, document.title, `/compra?event=${eventId}`);
     } catch (e) {
-        errorMsg.value = e.response?.data?.message || 'No se pudo finalizar la compra tras el pago con tarjeta.';
+        let msg = e.response?.data?.message || 'No se pudo finalizar la compra tras el pago con tarjeta.';
+        if (e.response?.data?.details) {
+            msg += '\nDetalles: ' + JSON.stringify(e.response.data.details);
+        }
+        errorMsg.value = msg;
     } finally {
         purchasing.value = false;
     }
@@ -238,7 +242,11 @@ const purchase = async () => {
         orderResult.value = data;
         step.value = 5;
     } catch (e) {
-        errorMsg.value = e.response?.data?.message || 'Error al procesar la compra.';
+        let msg = e.response?.data?.message || 'Error al procesar la compra.';
+        if (e.response?.data?.details) {
+            msg += '\nDetalles: ' + JSON.stringify(e.response.data.details);
+        }
+        errorMsg.value = msg;
     } finally {
         purchasing.value = false;
     }

@@ -149,10 +149,19 @@ class CheckoutController extends Controller
         $subtotal = $context['subtotal'];
         $total = max(0, $subtotal);
 
+
+
+        // Siempre usar la URL absoluta del backend para MercadoPago
         $baseUrl = rtrim((string) config('app.url'), '/');
-        $successUrl = $data['success_url'] ?? "{$baseUrl}/compra?event={$event->id}";
-        $failureUrl = $data['failure_url'] ?? "{$baseUrl}/compra?event={$event->id}";
-        $pendingUrl = $data['pending_url'] ?? "{$baseUrl}/compra?event={$event->id}";
+        $successUrl = "{$baseUrl}/compra?event={$event->id}";
+        $failureUrl = "{$baseUrl}/compra?event={$event->id}";
+        $pendingUrl = "{$baseUrl}/compra?event={$event->id}";
+
+        $backUrls = [
+            'success' => $successUrl,
+            'failure' => $failureUrl,
+            'pending' => $pendingUrl,
+        ];
 
         $payload = [
             'items' => [[
@@ -165,15 +174,14 @@ class CheckoutController extends Controller
                 'name' => $data['buyer_name'],
                 'email' => $data['buyer_email'],
             ],
-            'back_urls' => [
-                'success' => $successUrl,
-                'failure' => $failureUrl,
-                'pending' => $pendingUrl,
-            ],
-            'auto_return' => 'approved',
+            'back_urls' => $backUrls,
             'external_reference' => "EV{$event->id}-ZN{$zone->id}-Q{$data['quantity']}",
             'statement_descriptor' => 'LAREATA DIGITAL',
         ];
+        // Solo incluir auto_return si success está definido y no es vacío
+        if (!empty($backUrls['success'])) {
+            $payload['auto_return'] = 'approved';
+        }
 
         $response = Http::withToken($token)
             ->acceptJson()

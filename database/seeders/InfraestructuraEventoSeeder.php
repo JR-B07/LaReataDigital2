@@ -18,9 +18,9 @@ class InfraestructuraEventoSeeder extends Seeder
         $lienzoId = $event->id_lienzo;
 
         $zones = [
-            ['nombre' => 'Gradas', 'precio' => 180.00, 'filas' => 4, 'asientos_por_fila' => 20],
-            ['nombre' => 'Preferente', 'precio' => 280.00, 'filas' => 3, 'asientos_por_fila' => 16],
-            ['nombre' => 'VIP', 'precio' => 420.00, 'filas' => 2, 'asientos_por_fila' => 12],
+            ['nombre' => 'Gradas', 'precio' => 1.00, 'filas' => 4, 'asientos_por_fila' => 20],
+            ['nombre' => 'Preferente', 'precio' => 1.00, 'filas' => 3, 'asientos_por_fila' => 16],
+            ['nombre' => 'VIP', 'precio' => 1.00, 'filas' => 2, 'asientos_por_fila' => 12],
         ];
 
         foreach ($zones as $zone) {
@@ -43,7 +43,7 @@ class InfraestructuraEventoSeeder extends Seeder
             }
 
             for ($row = 1; $row <= $zone['filas']; $row++) {
-                $rowName = 'Fila '.chr(64 + $row);
+                $rowName = 'Fila ' . chr(64 + $row);
                 $filaId = DB::table('filas')->where('id_zona', $zoneId)->where('nombre', $rowName)->value('id');
 
                 if (! $filaId) {
