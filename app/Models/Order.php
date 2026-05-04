@@ -27,6 +27,10 @@ class Order extends Model
         'telefono_cliente',
         'correo_cliente',
         'referencia_pago',
+        'mercadopago_transaction_id',
+        'mercadopago_preference_id',
+        'mercadopago_payment_status',
+        'mercadopago_response',
     ];
 
     public function items()

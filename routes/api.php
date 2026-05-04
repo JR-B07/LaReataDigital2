@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\Admin\EventController as AdminEventController;
 use App\Http\Controllers\Api\Admin\ReportController;
 use App\Http\Controllers\Api\Admin\UserController;
+use App\Http\Controllers\Api\Admin\WebhookLogController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BarPosController;
 use App\Http\Controllers\Api\CheckoutController;
@@ -10,6 +11,7 @@ use App\Http\Controllers\Api\PublicEventController;
 use App\Http\Controllers\Api\TaquillaPosController;
 use App\Http\Controllers\Api\TicketController;
 use App\Http\Controllers\Api\ValidatorController;
+use App\Http\Controllers\Api\WebhookController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('auth')->group(function () {
@@ -28,6 +30,16 @@ Route::get('/tickets/{code}/pdf', [TicketController::class, 'downloadPdf']);
 
 Route::post('/checkout', [CheckoutController::class, 'store']);
 Route::post('/checkout/mercadopago/preference', [CheckoutController::class, 'createMercadoPagoPreference']);
+
+// Webhooks (sin autenticación)
+Route::prefix('webhook')->group(function () {
+    Route::post('/mercadopago', [WebhookController::class, 'mercadopago']);
+});
+
+// Endpoints de retorno de Mercado Pago (sin autenticación)
+Route::get('/checkout/success', [WebhookController::class, 'mercadopagoSuccess']);
+Route::get('/checkout/failure', [WebhookController::class, 'mercadopagoFailure']);
+Route::get('/checkout/pending', [WebhookController::class, 'mercadopagoPending']);
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/orders/history', [CheckoutController::class, 'history']);
@@ -81,6 +93,13 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('/users/{user}', [UserController::class, 'update']);
         Route::patch('/users/{user}/toggle-active', [UserController::class, 'toggleActive']);
         Route::delete('/users/{user}', [UserController::class, 'destroy']);
+
+        // Webhook Logs de Mercado Pago
+        Route::get('/webhook-logs', [WebhookLogController::class, 'index']);
+        Route::get('/webhook-logs/{webhookLog}', [WebhookLogController::class, 'show']);
+        Route::post('/webhook-logs/{webhookLog}/retry', [WebhookLogController::class, 'retry']);
+        Route::get('/webhook-logs-stats', [WebhookLogController::class, 'stats']);
+        Route::get('/webhook-logs-summary', [WebhookLogController::class, 'summaryByType']);
 
         Route::get('/bar/reports/sales-by-product', [BarPosController::class, 'reportSalesByProduct']);
         Route::get('/bar/reports/sales-by-payment', [BarPosController::class, 'reportSalesByPayment']);
