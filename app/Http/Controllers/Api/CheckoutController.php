@@ -7,7 +7,6 @@ use App\Mail\TicketsPurchasedMail;
 use App\Models\Event;
 use App\Models\Order;
 use App\Models\Ticket;
-use App\Services\MercadoPagoService;
 use App\Services\TicketCodeService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
@@ -21,10 +20,7 @@ use Throwable;
 
 class CheckoutController extends Controller
 {
-    public function __construct(
-        private readonly TicketCodeService $ticketCodeService,
-        private readonly MercadoPagoService $mercadoPagoService,
-    ) {}
+    public function __construct(private readonly TicketCodeService $ticketCodeService) {}
 
     public function store(Request $request): JsonResponse
     {
@@ -133,6 +129,13 @@ class CheckoutController extends Controller
             'pending_url' => ['nullable', 'url'],
         ]);
 
+        $token = (string) config('services.mercadopago.access_token');
+        if ($token === '') {
+            return response()->json([
+                'message' => 'Mercado Pago no configurado. Falta MERCADOPAGO_ACCESS_TOKEN.',
+            ], 422);
+        }
+
         $context = $this->resolveCheckoutContext($data);
 
         if (isset($context['error'])) {
@@ -146,28 +149,54 @@ class CheckoutController extends Controller
         $subtotal = $context['subtotal'];
         $total = max(0, $subtotal);
 
-        $preferenceData = [
-            'title' => "{$event->name} - {$zone->nombre}",
-            'quantity' => (int) $data['quantity'],
-            'unit_price' => round($total / max(1, (int) $data['quantity']), 2),
-            'payer_name' => $data['buyer_name'],
-            'payer_email' => $data['buyer_email'],
-            'payer_phone' => $data['buyer_phone'] ?? '',
-            'external_reference' => "EV{$event->id}-ZN{$zone->id}-Q{$data['quantity']}",
+
+
+        // Siempre usar la URL absoluta del backend para MercadoPago
+        $baseUrl = rtrim((string) config('app.url'), '/');
+        $successUrl = "{$baseUrl}/compra?event={$event->id}";
+        $failureUrl = "{$baseUrl}/compra?event={$event->id}";
+        $pendingUrl = "{$baseUrl}/compra?event={$event->id}";
+
+        $backUrls = [
+            'success' => $successUrl,
+            'failure' => $failureUrl,
+            'pending' => $pendingUrl,
         ];
 
-        $result = $this->mercadoPagoService->createPreference($preferenceData);
+        $payload = [
+            'items' => [[
+                'title' => "{$event->name} - {$zone->nombre}",
+                'quantity' => (int) $data['quantity'],
+                'currency_id' => 'MXN',
+                'unit_price' => round($total / max(1, (int) $data['quantity']), 2),
+            ]],
+            'payer' => [
+                'name' => $data['buyer_name'],
+                'email' => $data['buyer_email'],
+            ],
+            'back_urls' => $backUrls,
+            'external_reference' => "EV{$event->id}-ZN{$zone->id}-Q{$data['quantity']}",
+            'statement_descriptor' => 'LAREATA DIGITAL',
+        ];
+        // Solo incluir auto_return si success está definido y no es vacío
+        if (!empty($backUrls['success'])) {
+            $payload['auto_return'] = 'approved';
+        }
 
-        if (!$result['success']) {
+        $response = Http::withToken($token)
+            ->acceptJson()
+            ->post('https://api.mercadopago.com/checkout/preferences', $payload);
+
+        if (! $response->successful()) {
             return response()->json([
-                'message' => $result['message'],
-                'details' => $result['details'] ?? null,
+                'message' => 'No se pudo crear la preferencia de pago en Mercado Pago.',
+                'details' => $response->json(),
             ], 422);
         }
 
         return response()->json([
-            'redirect_url' => $result['init_point'] ?: $result['sandbox_init_point'],
-            'preference_id' => $result['preference_id'],
+            'redirect_url' => $response->json('init_point') ?: $response->json('sandbox_init_point'),
+            'preference_id' => $response->json('id'),
         ]);
     }
 
