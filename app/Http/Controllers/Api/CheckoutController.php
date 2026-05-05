@@ -124,6 +124,7 @@ class CheckoutController extends Controller
             'buyer_name' => ['required', 'string', 'max:255'],
             'buyer_email' => ['required', 'string', 'max:255'],
             'buyer_phone' => ['nullable', 'string', 'max:30'],
+            'payment_method' => ['required', 'in:card'],
             'success_url' => ['nullable', 'url'],
             'failure_url' => ['nullable', 'url'],
             'pending_url' => ['nullable', 'url'],
@@ -149,13 +150,40 @@ class CheckoutController extends Controller
         $subtotal = $context['subtotal'];
         $total = max(0, $subtotal);
 
+        $cardPaymentLimit = 20000;
+        if ($data['payment_method'] === 'card' && $total > $cardPaymentLimit) {
+            return response()->json([
+                'message' => "El pago con tarjeta está limitado a MXN {$cardPaymentLimit}. Reduce la cantidad de boletos o selecciona otro método de pago.",
+            ], 422);
+        }
 
+        // No limitar el tipo de tarjeta aquí: Mercado Pago controla qué tarjetas acepta.
+        // Solo controlemos cuotas y monto máximo para el checkout.
 
-        // Siempre usar la URL absoluta del backend para MercadoPago
+        // Usar siempre la URL absoluta definida en APP_URL para Mercado Pago.
         $baseUrl = rtrim((string) config('app.url'), '/');
-        $successUrl = "{$baseUrl}/compra?event={$event->id}";
-        $failureUrl = "{$baseUrl}/compra?event={$event->id}";
-        $pendingUrl = "{$baseUrl}/compra?event={$event->id}";
+        if ($baseUrl === '') {
+            return response()->json([
+                'message' => 'APP_URL no está configurada. Actualiza tu archivo .env con la URL completa de tu aplicación.',
+            ], 422);
+        }
+
+        $parsedBaseUrl = parse_url($baseUrl);
+        if (! $parsedBaseUrl || empty($parsedBaseUrl['scheme']) || empty($parsedBaseUrl['host'])) {
+            return response()->json([
+                'message' => 'APP_URL no es una URL válida. Debe ser algo como https://marcamgr.devsistems.com.',
+            ], 422);
+        }
+
+        if (config('app.env') !== 'local' && ($parsedBaseUrl['scheme'] ?? '') !== 'https') {
+            return response()->json([
+                'message' => 'APP_URL debe usar HTTPS en entornos de producción.',
+            ], 422);
+        }
+
+        $successUrl = $data['success_url'] ?? "{$baseUrl}/compra?event={$event->id}";
+        $failureUrl = $data['failure_url'] ?? "{$baseUrl}/compra?event={$event->id}";
+        $pendingUrl = $data['pending_url'] ?? "{$baseUrl}/compra?event={$event->id}";
 
         $backUrls = [
             'success' => $successUrl,
@@ -177,6 +205,7 @@ class CheckoutController extends Controller
             'back_urls' => $backUrls,
             'external_reference' => "EV{$event->id}-ZN{$zone->id}-Q{$data['quantity']}",
             'statement_descriptor' => 'LAREATA DIGITAL',
+            'notification_url' => "{$baseUrl}/api/webhook/mercadopago",
         ];
         // Solo incluir auto_return si success está definido y no es vacío
         if (!empty($backUrls['success'])) {
@@ -194,9 +223,16 @@ class CheckoutController extends Controller
             ], 422);
         }
 
+        $redirectUrl = $response->json('init_point') ?: $response->json('sandbox_init_point');
+        if (str_starts_with($token, 'TEST-') && $response->json('sandbox_init_point')) {
+            $redirectUrl = $response->json('sandbox_init_point');
+        }
+
         return response()->json([
-            'redirect_url' => $response->json('init_point') ?: $response->json('sandbox_init_point'),
+            'redirect_url' => $redirectUrl,
             'preference_id' => $response->json('id'),
+            'back_urls' => $backUrls,
+            'base_url' => $baseUrl,
         ]);
     }
 
