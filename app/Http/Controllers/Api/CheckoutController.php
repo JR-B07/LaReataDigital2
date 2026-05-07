@@ -52,7 +52,6 @@ class CheckoutController extends Controller
 
         $result = DB::transaction(function () use ($data, $event, $availableTickets, $subtotal, $total) {
             $order = Order::query()->create([
-                // Las compras publicas no deben crear cuentas operativas reutilizables.
                 'id_usuario' => null,
                 'total' => $total,
                 'metodo_pago' => match ($data['payment_method']) {
@@ -157,10 +156,6 @@ class CheckoutController extends Controller
             ], 422);
         }
 
-        // No limitar el tipo de tarjeta aquí: Mercado Pago controla qué tarjetas acepta.
-        // Solo controlemos cuotas y monto máximo para el checkout.
-
-        // Usar siempre la URL absoluta definida en APP_URL para Mercado Pago.
         $baseUrl = rtrim((string) config('app.url'), '/');
         if ($baseUrl === '') {
             return response()->json([
@@ -181,9 +176,9 @@ class CheckoutController extends Controller
             ], 422);
         }
 
-        $successUrl = $data['success_url'] ?? "{$baseUrl}/compra?event={$event->id}";
-        $failureUrl = $data['failure_url'] ?? "{$baseUrl}/compra?event={$event->id}";
-        $pendingUrl = $data['pending_url'] ?? "{$baseUrl}/compra?event={$event->id}";
+        $successUrl = $data['success_url'] ?? "{$baseUrl}/checkout/success?event_id={$event->id}";
+        $failureUrl = $data['failure_url'] ?? "{$baseUrl}/checkout/failure?event_id={$event->id}";
+        $pendingUrl = $data['pending_url'] ?? "{$baseUrl}/checkout/pending?event_id={$event->id}";
 
         $backUrls = [
             'success' => $successUrl,
@@ -207,10 +202,16 @@ class CheckoutController extends Controller
             'statement_descriptor' => 'LAREATA DIGITAL',
             'notification_url' => "{$baseUrl}/api/webhook/mercadopago",
         ];
-        // Solo incluir auto_return si success está definido y no es vacío
+
         if (!empty($backUrls['success'])) {
             $payload['auto_return'] = 'approved';
         }
+
+        $payload['payment_methods'] = [
+            'excluded_payment_methods' => [],
+            'excluded_payment_types' => [],
+            'installments' => 12,
+        ];
 
         $response = Http::withToken($token)
             ->acceptJson()
