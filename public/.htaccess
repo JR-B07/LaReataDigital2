@@ -1,3 +1,7 @@
+<IfModule mod_headers.c>
+    Header set Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-eval' https://www.mercadopago.com https://sdk.mercadopago.com https://http2.mlstatic.com https://secure.mlstatic.com 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://www.mercadopago.com https://sdk.mercadopago.com; frame-src https://www.mercadopago.com https://sdk.mercadopago.com; connect-src 'self' https://api.mercadopago.com https://www.mercadopago.com;"
+</IfModule>
+
 <IfModule mod_rewrite.c>
     <IfModule mod_negotiation.c>
         Options -MultiViews -Indexes

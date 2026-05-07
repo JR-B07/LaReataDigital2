@@ -23,9 +23,12 @@ const eventId = new URLSearchParams(window.location.search).get('event');
 
 const consumeMercadoPagoReturn = async () => {
     const params = new URLSearchParams(window.location.search);
-    const status = params.get('status') || params.get('collection_status');
-    const paymentId = params.get('payment_id') || params.get('collection_id');
+    // MercadoPago puede devolver cualquiera de estos parámetros
+    const status = params.get('status') || params.get('collection_status') || params.get('payment_status');
+    const paymentId = params.get('payment_id') || params.get('collection_id') || params.get('preference_id');
+    const externalReference = params.get('external_reference');
 
+    // Si no hay status, no hacemos nada
     if (!status) return;
 
     const raw = localStorage.getItem(pendingCardCheckoutKey);
@@ -43,9 +46,13 @@ const consumeMercadoPagoReturn = async () => {
         return;
     }
 
+    // Solo procesar si el pago fue aprobado
     if (status !== 'approved') {
-        errorMsg.value = 'El pago con tarjeta no fue aprobado. Intenta nuevamente.';
+        errorMsg.value = `El pago con tarjeta no fue aprobado (${status}). Intenta nuevamente.`;
         localStorage.removeItem(pendingCardCheckoutKey);
+        // Limpiar URL para que no vuelva a procesar
+        window.history.replaceState({}, document.title, `/compra?event=${eventId}`);
+        step.value = 4; // Volver al paso de pago
         return;
     }
 
@@ -63,12 +70,13 @@ const consumeMercadoPagoReturn = async () => {
         const { data } = await window.axios.post('/api/checkout', {
             ...payload,
             payment_method: 'card',
-            payment_reference: paymentId || null,
+            payment_reference: paymentId || externalReference || null,
         });
 
         orderResult.value = data;
         step.value = 5;
         localStorage.removeItem(pendingCardCheckoutKey);
+        // Limpiar URL
         window.history.replaceState({}, document.title, `/compra?event=${eventId}`);
     } catch (e) {
         let msg = e.response?.data?.message || 'No se pudo finalizar la compra tras el pago con tarjeta.';
@@ -76,11 +84,11 @@ const consumeMercadoPagoReturn = async () => {
             msg += '\nDetalles: ' + JSON.stringify(e.response.data.details);
         }
         errorMsg.value = msg;
+        step.value = 4; // Volver a pago para reintentar
     } finally {
         purchasing.value = false;
     }
 };
-
 onMounted(async () => {
     if (!eventId) { loading.value = false; return; }
     try {
@@ -198,7 +206,11 @@ const purchase = async () => {
     purchasing.value = true;
     errorMsg.value = '';
     const selectedIdx = selectedZoneIndex.value >= 0 ? selectedZoneIndex.value : qtys.value.findIndex(q => q > 0);
-    if (selectedIdx === -1) return;
+    if (selectedIdx === -1) {
+        errorMsg.value = 'Selecciona una zona';
+        purchasing.value = false;
+        return;
+    }
 
     const checkoutPayload = {
         event_id: event.value.id,
@@ -220,24 +232,29 @@ const purchase = async () => {
         };
 
         if (paymentMethod.value === 'card') {
-            const successUrl = `${window.location.origin}/compra?event=${event.value.id}`;
+            // Guardar en localStorage ANTES de redirigir
             localStorage.setItem(pendingCardCheckoutKey, JSON.stringify(checkoutPayload));
-
+            
+            // URL actual sin parámetros para el retorno
+            const returnUrl = `${window.location.origin}/compra?event=${event.value.id}`;
+            
             const { data } = await window.axios.post('/api/checkout/mercadopago/preference', {
                 ...checkoutPayload,
-                success_url: successUrl,
-                failure_url: successUrl,
-                pending_url: successUrl,
+                success_url: returnUrl,
+                failure_url: returnUrl,
+                pending_url: returnUrl,
             });
 
             if (!data?.redirect_url) {
                 throw new Error('Mercado Pago no devolvió URL de pago.');
             }
 
+            // Redirigir a MercadoPago
             window.location.href = data.redirect_url;
             return;
         }
 
+        // OXXO o Transferencia
         const { data } = await window.axios.post('/api/checkout', checkoutPayload);
         orderResult.value = data;
         step.value = 5;
@@ -247,6 +264,10 @@ const purchase = async () => {
             msg += '\nDetalles: ' + JSON.stringify(e.response.data.details);
         }
         errorMsg.value = msg;
+        // Limpiar localStorage si hubo error
+        if (paymentMethod.value === 'card') {
+            localStorage.removeItem(pendingCardCheckoutKey);
+        }
     } finally {
         purchasing.value = false;
     }
