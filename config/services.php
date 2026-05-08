@@ -36,8 +36,11 @@ return [
     ],
 
     'mercadopago' => [
+        'mode' => env('MERCADOPAGO_MODE', 'production'),
         'access_token' => env('MERCADOPAGO_ACCESS_TOKEN'),
+        'sandbox_access_token' => env('MERCADOPAGO_SANDBOX_ACCESS_TOKEN'),
         'public_key' => env('MERCADOPAGO_PUBLIC_KEY'),
+        'sandbox_public_key' => env('MERCADOPAGO_SANDBOX_PUBLIC_KEY'),
     ],
 
 ];

@@ -16,7 +16,11 @@ class MercadoPagoService
 
     public function __construct()
     {
-        $this->accessToken = (string) config('services.mercadopago.access_token');
+        $mercadoPagoConfig = config('services.mercadopago');
+        $mode = $mercadoPagoConfig['mode'] ?? 'production';
+        $this->accessToken = $mode === 'sandbox'
+            ? (string) ($mercadoPagoConfig['sandbox_access_token'] ?? $mercadoPagoConfig['access_token'])
+            : (string) $mercadoPagoConfig['access_token'];
         $this->baseUrl = rtrim((string) config('app.url'), '/');
     }
 

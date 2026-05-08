@@ -32,6 +32,7 @@ class CheckoutController extends Controller
             'buyer_email' => ['required', 'string', 'max:255'],
             'buyer_phone' => ['nullable', 'string', 'max:30'],
             'payment_method' => ['required', 'in:card,oxxo,transfer'],
+            'payment_status' => ['nullable', 'string', 'max:50'],
             'discount_code' => ['nullable', 'string', 'max:50'],
             'payment_reference' => ['nullable', 'string', 'max:120'],
         ]);
@@ -51,6 +52,19 @@ class CheckoutController extends Controller
         $total = max(0, $subtotal - $discountTotal);
 
         $result = DB::transaction(function () use ($data, $event, $availableTickets, $subtotal, $total) {
+            $statusMap = [
+                'approved' => 'pagado',
+                'pending' => 'pendiente',
+                'in_process' => 'procesando',
+                'authorized' => 'autorizado',
+                'rejected' => 'rechazado',
+                'cancelled' => 'cancelado',
+            ];
+
+            $estadoPago = $statusMap[strtolower($data['payment_status'] ?? '')] ?? (
+                $data['payment_method'] === 'card' ? 'pagado' : 'pendiente'
+            );
+
             $order = Order::query()->create([
                 // Las compras publicas no deben crear cuentas operativas reutilizables.
                 'id_usuario' => null,
@@ -61,7 +75,7 @@ class CheckoutController extends Controller
                     default => 'efectivo',
                 },
                 'canal_venta' => 'online',
-                'estado_pago' => 'pagado',
+                'estado_pago' => $estadoPago,
                 'nombre_cliente' => $data['buyer_name'],
                 'telefono_cliente' => $data['buyer_phone'] ?? null,
                 'correo_cliente' => $data['buyer_email'],
@@ -124,16 +138,21 @@ class CheckoutController extends Controller
             'buyer_name' => ['required', 'string', 'max:255'],
             'buyer_email' => ['required', 'string', 'max:255'],
             'buyer_phone' => ['nullable', 'string', 'max:30'],
-            'payment_method' => ['required', 'in:card'],
+            'payment_method' => ['required', 'in:card,oxxo,transfer'],
             'success_url' => ['nullable', 'url'],
             'failure_url' => ['nullable', 'url'],
             'pending_url' => ['nullable', 'url'],
         ]);
 
-        $token = (string) config('services.mercadopago.access_token');
+        $mercadoPagoConfig = config('services.mercadopago');
+        $mode = $mercadoPagoConfig['mode'] ?? 'production';
+        $token = $mode === 'sandbox'
+            ? (string) ($mercadoPagoConfig['sandbox_access_token'] ?? $mercadoPagoConfig['access_token'])
+            : (string) $mercadoPagoConfig['access_token'];
+
         if ($token === '') {
             return response()->json([
-                'message' => 'Mercado Pago no configurado. Falta MERCADOPAGO_ACCESS_TOKEN.',
+                'message' => 'Mercado Pago no configurado. Falta el token de acceso para el modo actual.',
             ], 422);
         }
 
@@ -160,6 +179,32 @@ class CheckoutController extends Controller
         // No limitar el tipo de tarjeta aquí: Mercado Pago controla qué tarjetas acepta.
         // Solo controlemos cuotas y monto máximo para el checkout.
 
+        $paymentMethods = null;
+        if ($data['payment_method'] === 'card') {
+            $paymentMethods = [
+                'installments' => 6,
+                'default_installments' => 1,
+            ];
+        } elseif ($data['payment_method'] === 'oxxo') {
+            $paymentMethods = [
+                'excluded_payment_types' => [
+                    ['id' => 'atm'],
+                    ['id' => 'credit_card'],
+                    ['id' => 'debit_card'],
+                    ['id' => 'bank_transfer'],
+                ],
+            ];
+        } elseif ($data['payment_method'] === 'transfer') {
+            $paymentMethods = [
+                'excluded_payment_types' => [
+                    ['id' => 'ticket'],
+                    ['id' => 'atm'],
+                    ['id' => 'credit_card'],
+                    ['id' => 'debit_card'],
+                ],
+            ];
+        }
+
         // Usar siempre la URL absoluta definida en APP_URL para Mercado Pago.
         $baseUrl = rtrim((string) config('app.url'), '/');
         if ($baseUrl === '') {
@@ -181,15 +226,21 @@ class CheckoutController extends Controller
             ], 422);
         }
 
-        $successUrl = $data['success_url'] ?? "{$baseUrl}/compra?event={$event->id}";
-        $failureUrl = $data['failure_url'] ?? "{$baseUrl}/compra?event={$event->id}";
-        $pendingUrl = $data['pending_url'] ?? "{$baseUrl}/compra?event={$event->id}";
+        $successUrl = trim($data['success_url'] ?? "{$baseUrl}/compra?event={$event->id}");
+        $failureUrl = trim($data['failure_url'] ?? "{$baseUrl}/compra?event={$event->id}");
+        $pendingUrl = trim($data['pending_url'] ?? "{$baseUrl}/compra?event={$event->id}");
 
         $backUrls = [
             'success' => $successUrl,
             'failure' => $failureUrl,
             'pending' => $pendingUrl,
         ];
+
+        if ($data['payment_method'] === 'card' && $backUrls['success'] === '') {
+            return response()->json([
+                'message' => 'Para pagos con tarjeta es necesario definir success_url en el payload.',
+            ], 422);
+        }
 
         $payload = [
             'items' => [[
@@ -201,31 +252,66 @@ class CheckoutController extends Controller
             'payer' => [
                 'name' => $data['buyer_name'],
                 'email' => $data['buyer_email'],
+                'phone' => [
+                    'area_code' => '52',
+                    'number' => preg_replace('/\D/', '', $data['buyer_phone'] ?? ''),
+                ],
             ],
             'back_urls' => $backUrls,
             'external_reference' => "EV{$event->id}-ZN{$zone->id}-Q{$data['quantity']}",
             'statement_descriptor' => 'LAREATA DIGITAL',
             'notification_url' => "{$baseUrl}/api/webhook/mercadopago",
         ];
-        // Solo incluir auto_return si success está definido y no es vacío
-        if (!empty($backUrls['success'])) {
+
+        if ($paymentMethods !== null) {
+            $payload['payment_methods'] = $paymentMethods;
+        }
+
+        if ($data['payment_method'] === 'card' && config('app.env') !== 'local') {
             $payload['auto_return'] = 'approved';
         }
+
+        $isSandbox = $mode === 'sandbox';
+        if (config('app.env') === 'local' && ! $isSandbox) {
+            Log::warning('Mercado Pago en entorno local con token de producción. Las tarjetas de prueba pueden fallar.', [
+                'token_prefix' => substr($token, 0, 6),
+            ]);
+        }
+
+        Log::debug('Mercado Pago preference payload', [
+            'mode' => $mode,
+            'base_url' => $baseUrl,
+            'payload' => $payload,
+        ]);
 
         $response = Http::withToken($token)
             ->acceptJson()
             ->post('https://api.mercadopago.com/checkout/preferences', $payload);
 
+        Log::debug('Mercado Pago preference response', [
+            'status' => $response->status(),
+            'body' => $response->json(),
+            'request' => $payload,
+        ]);
+
         if (! $response->successful()) {
             return response()->json([
                 'message' => 'No se pudo crear la preferencia de pago en Mercado Pago.',
                 'details' => $response->json(),
+                'request' => $payload,
             ], 422);
         }
 
         $redirectUrl = $response->json('init_point') ?: $response->json('sandbox_init_point');
-        if (str_starts_with($token, 'TEST-') && $response->json('sandbox_init_point')) {
+        if ($isSandbox && $response->json('sandbox_init_point')) {
             $redirectUrl = $response->json('sandbox_init_point');
+        }
+
+        if (! $redirectUrl) {
+            return response()->json([
+                'message' => 'Mercado Pago no devolvió URL de redirección.',
+                'details' => $response->json(),
+            ], 422);
         }
 
         return response()->json([
@@ -233,6 +319,7 @@ class CheckoutController extends Controller
             'preference_id' => $response->json('id'),
             'back_urls' => $backUrls,
             'base_url' => $baseUrl,
+            'mode' => $isSandbox ? 'sandbox' : 'production',
         ]);
     }
 

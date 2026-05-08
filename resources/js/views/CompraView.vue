@@ -17,7 +17,7 @@ const purchasing = ref(false);
 const orderResult = ref(null);
 const purchaseSnapshot = ref(null);
 const errorMsg = ref('');
-const pendingCardCheckoutKey = 'pending_card_checkout';
+const pendingCheckoutKey = 'pending_checkout';
 
 const eventId = new URLSearchParams(window.location.search).get('event');
 
@@ -28,14 +28,14 @@ const consumeMercadoPagoReturn = async () => {
 
     if (!status) return;
 
-    const raw = localStorage.getItem(pendingCardCheckoutKey);
+    const raw = localStorage.getItem(pendingCheckoutKey);
     if (!raw) return;
 
     let payload = null;
     try {
         payload = JSON.parse(raw);
     } catch {
-        localStorage.removeItem(pendingCardCheckoutKey);
+        localStorage.removeItem(pendingCheckoutKey);
         return;
     }
 
@@ -43,9 +43,12 @@ const consumeMercadoPagoReturn = async () => {
         return;
     }
 
-    if (status !== 'approved') {
-        errorMsg.value = 'El pago con tarjeta no fue aprobado. Intenta nuevamente.';
-        localStorage.removeItem(pendingCardCheckoutKey);
+    const normalizedStatus = String(status).toLowerCase();
+    const isPaymentAccepted = normalizedStatus === 'approved' || normalizedStatus.startsWith('pending');
+
+    if (!isPaymentAccepted) {
+        errorMsg.value = 'El pago no fue aprobado. Intenta nuevamente.';
+        localStorage.removeItem(pendingCheckoutKey);
         return;
     }
 
@@ -62,13 +65,14 @@ const consumeMercadoPagoReturn = async () => {
 
         const { data } = await window.axios.post('/api/checkout', {
             ...payload,
-            payment_method: 'card',
+            payment_method: payload.payment_method,
+            payment_status: normalizedStatus,
             payment_reference: paymentId || null,
         });
 
         orderResult.value = data;
         step.value = 5;
-        localStorage.removeItem(pendingCardCheckoutKey);
+        localStorage.removeItem(pendingCheckoutKey);
         window.history.replaceState({}, document.title, `/compra?event=${eventId}`);
     } catch (e) {
         let msg = e.response?.data?.message || 'No se pudo finalizar la compra tras el pago con tarjeta.';
@@ -219,9 +223,9 @@ const purchase = async () => {
             paidAt: new Date().toISOString(),
         };
 
-        if (paymentMethod.value === 'card') {
+        if (['card', 'oxxo', 'transfer'].includes(paymentMethod.value)) {
             const successUrl = `${window.location.origin}/compra?event=${event.value.id}`;
-            localStorage.setItem(pendingCardCheckoutKey, JSON.stringify(checkoutPayload));
+            localStorage.setItem(pendingCheckoutKey, JSON.stringify(checkoutPayload));
 
             const { data } = await window.axios.post('/api/checkout/mercadopago/preference', {
                 ...checkoutPayload,
