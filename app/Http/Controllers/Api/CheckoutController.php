@@ -279,21 +279,12 @@ class CheckoutController extends Controller
             ]);
         }
 
-        Log::debug('Mercado Pago preference payload', [
-            'mode' => $mode,
-            'base_url' => $baseUrl,
-            'payload' => $payload,
-        ]);
 
         $response = Http::withToken($token)
             ->acceptJson()
             ->post('https://api.mercadopago.com/checkout/preferences', $payload);
 
-        Log::debug('Mercado Pago preference response', [
-            'status' => $response->status(),
-            'body' => $response->json(),
-            'request' => $payload,
-        ]);
+
 
         if (! $response->successful()) {
             return response()->json([
@@ -491,9 +482,6 @@ class CheckoutController extends Controller
             'failure_url' => $failureUrl,
         ];
 
-        Log::debug('Conekta checkout request', [
-            'payload' => $checkoutPayload,
-        ]);
 
         $result = $conektaService->createCheckoutSession($checkoutPayload);
 
@@ -511,7 +499,9 @@ class CheckoutController extends Controller
 
         return response()->json([
             'checkout_url' => $result['checkout_url'],
-            'session_id' => $result['session_id'],
+$orderId = $responseData['id'] ?? null,
+$checkoutId = $responseData['checkout']['id'] ?? null,
+$checkoutUrl = "https://pay.conekta.com/checkout/{$checkoutId}",
             'expires_at' => $result['expires_at'] ?? null,
             'back_urls' => [
                 'success' => $successUrl,

@@ -19,99 +19,111 @@ class ConektaService
     {
         $conektaConfig = config('services.conekta');
         $this->apiKey = (string) ($conektaConfig['api_key'] ?? '');
-        $this->apiVersion = 'v1';
+        $this->apiVersion = 'v2';
         $this->baseUrl = 'https://api.conekta.io';
     }
 
     /**
      * Crear una sesión de checkout para Conekta
      */
-    public function createCheckoutSession(array $data): array
-    {
-        if (! $this->apiKey) {
-            return [
-                'success' => false,
-                'message' => 'Conekta no está configurado. Falta CONEKTA_API_KEY.',
-            ];
-        }
+public function createCheckoutSession(array $data): array
+{
+    if (! $this->apiKey) {
+        Log::error('Conekta API key missing');
 
-        try {
-            $payload = [
-                'line_items' => [[
-                    'name' => $data['title'],
-                    'description' => $data['description'] ?? '',
-                    'unit_price' => round((float) $data['unit_price'] * 100), // Conekta usa centavos
-                    'quantity' => (int) $data['quantity'],
-                ]],
-                'currency' => 'MXN',
-                'customer_info' => [
-                    'name' => $data['payer_name'],
-                    'email' => $data['payer_email'],
-                    'phone' => $this->sanitizePhone($data['payer_phone'] ?? ''),
-                ],
-                'checkout' => [
-                    'allowed_payment_methods' => ['card', 'bank_transfer', 'cash'],
-                    'expires_at' => time() + (24 * 60 * 60), // 24 horas
-                    'success_url' => $data['success_url'] ?? '',
-                    'failure_url' => $data['failure_url'] ?? '',
-                ],
-                'metadata' => [
-                    'external_reference' => $data['external_reference'] ?? '',
-                ],
-            ];
-
-            Log::debug('Conekta order payload', [
-                'payload' => $payload,
-            ]);
-
-            $response = Http::withBasicAuth($this->apiKey, '')
-                ->accept('application/json')
-                ->post("{$this->baseUrl}/{$this->apiVersion}/orders", $payload);
-
-            if (! $response->successful()) {
-                Log::error('Error al crear orden en Conekta', [
-                    'status' => $response->status(),
-                    'body' => $response->body(),
-                ]);
-
-                return [
-                    'success' => false,
-                    'message' => 'Error al crear sesión de pago',
-                    'details' => $response->json(),
-                ];
-            }
-
-            $responseData = $response->json();
-
-            return [
-                'success' => true,
-                'session_id' => $responseData['id'],
-                'checkout_url' => $responseData['checkout']['url'] ?? $responseData['url'] ?? '',
-                'expires_at' => $responseData['checkout']['expires_at'] ?? null,
-            ];
-        } catch (RequestException $exception) {
-            Log::error('Error HTTP al crear orden en Conekta', [
-                'error' => $exception->getMessage(),
-                'response' => $exception->response?->body(),
-            ]);
-
-            return [
-                'success' => false,
-                'message' => 'Error de comunicación con Conekta',
-                'details' => $exception->getMessage(),
-            ];
-        } catch (\Exception $exception) {
-            Log::error('Error inesperado en Conekta', [
-                'error' => $exception->getMessage(),
-            ]);
-
-            return [
-                'success' => false,
-                'message' => 'Error inesperado',
-                'details' => $exception->getMessage(),
-            ];
-        }
+        return [
+            'success' => false,
+            'message' => 'Conekta no está configurado. Falta CONEKTA_API_KEY.',
+        ];
     }
+
+    try {
+$payload = [
+    'line_items' => [[
+        'name' => $data['title'],
+        'description' => $data['description'] ?? '',
+        'unit_price' => (int) round($data['unit_price'] * 100),
+        'quantity' => (int) $data['quantity'],
+    ]],
+    'currency' => 'MXN',
+    'customer_info' => [
+        'name' => $data['payer_name'],
+        'email' => $data['payer_email'],
+        'phone' => $this->sanitizePhone($data['payer_phone'] ?? ''),
+    ],
+    'checkout' => [
+        'type' => 'Integration',
+        'allowed_payment_methods' => ['card'],
+        'success_url' => $data['success_url'],
+        'failure_url' => $data['failure_url'],
+    ],
+    'metadata' => [
+        'external_reference' => $data['external_reference'] ?? '',
+    ],
+];
+       
+
+       $response = Http::withBasicAuth($this->apiKey, '')
+    ->withHeaders([
+        'Accept' => 'application/vnd.conekta-v2.3.0+json',
+        'Content-Type' => 'application/json',
+    ])
+    ->post("{$this->baseUrl}/orders", $payload);
+       
+        if (! $response->successful()) {
+            Log::error('=== CONEKTA REQUEST FAILED ===', [
+                'status' => $response->status(),
+                'headers' => $response->headers(),
+                'response_body' => $response->body(),
+                'response_json' => $response->json(),
+                'sent_payload' => $payload,
+                'api_key_prefix' => substr($this->apiKey, 0, 8),
+            ]);
+
+            return [
+                'success' => false,
+                'message' => 'Error al crear sesión de pago',
+                'details' => $response->json(),
+            ];
+        }
+
+        $responseData = $response->json();
+
+
+$checkoutId = $responseData['channel']['checkout_request_id'] ?? null;
+$orderId = $responseData['id'] ?? null;
+return [
+    'success' => true,
+    'order_id' => $orderId,
+    'checkout_id' => $checkoutId,
+    'checkout_url' => $checkoutUrl,
+    'expires_at' => $responseData['checkout']['expires_at'] ?? null,
+];
+    } catch (\Illuminate\Http\Client\RequestException $exception) {
+        Log::error('=== CONEKTA HTTP EXCEPTION ===', [
+            'message' => $exception->getMessage(),
+            'response' => $exception->response?->body(),
+        ]);
+
+        return [
+            'success' => false,
+            'message' => 'Error de comunicación con Conekta',
+            'details' => $exception->getMessage(),
+        ];
+
+    } catch (\Exception $exception) {
+        Log::error('=== CONEKTA UNKNOWN ERROR ===', [
+            'message' => $exception->getMessage(),
+            'trace' => $exception->getTraceAsString(),
+        ]);
+
+        return [
+            'success' => false,
+            'message' => 'Error inesperado',
+            'details' => $exception->getMessage(),
+        ];
+    }
+}
 
     /**
      * Obtener información de cargo por ID
@@ -205,25 +217,17 @@ class ConektaService
                 ->first();
 
             if (! $order) {
-                Log::warning('No se encontró orden para cargo de Conekta', [
-                    'charge_id' => $chargeId,
-                    'external_reference' => $externalReference,
-                ]);
 
                 $webhookLog->markAsFailed('No se encontró orden asociada');
                 return false;
             }
 
-            // Actualizar estado de la orden según el evento
             $this->updateOrderFromWebhookEvent($order, $eventType, $chargeInfo, $data);
 
-            // Registrar webhook log ID en la orden
             $webhookLog->update(['order_id' => $order->id]);
 
-            // Disparar evento de pago recibido
             PaymentReceived::dispatch($order, $chargeInfo, $chargeId);
 
-            // Marcar webhook como exitoso
             $webhookLog->markAsSuccess([
                 'order_id' => $order->id,
                 'event_type' => $eventType,
@@ -263,11 +267,6 @@ class ConektaService
             'conekta_response' => $webhookData,
         ]);
 
-        Log::info('Orden actualizada con información de Conekta', [
-            'order_id' => $order->id,
-            'charge_id' => $chargeInfo['id'],
-            'event_type' => $eventType,
-        ]);
     }
 
     /**

@@ -229,11 +229,33 @@ const purchase = async () => {
             const failureUrl = `${window.location.origin}/compra?event=${event.value.id}&payment_provider=conekta&payment_status=failed`;
             localStorage.setItem(pendingCheckoutKey, JSON.stringify(checkoutPayload));
 
-            const { data } = await window.axios.post('/api/checkout/conekta', {
-                ...checkoutPayload,
-                success_url: successUrl,
-                failure_url: failureUrl,
-            });
+            const payloadToSend = {
+    ...checkoutPayload,
+    success_url: successUrl,
+    failure_url: failureUrl,
+};
+
+
+try {
+    const { data } = await window.axios.post(
+        '/api/checkout/conekta',
+        payloadToSend
+    );
+
+
+    if (!data?.checkout_url) {
+        throw new Error('Conekta no devolvió URL de pago.');
+    }
+
+    window.location.href = data.checkout_url;
+    return;
+
+} catch (e) {
+
+
+
+    throw e;
+}
 
             if (!data?.checkout_url) {
                 throw new Error('Conekta no devolvió URL de pago.');
