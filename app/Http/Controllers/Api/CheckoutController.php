@@ -7,6 +7,7 @@ use App\Mail\TicketsPurchasedMail;
 use App\Models\Event;
 use App\Models\Order;
 use App\Models\Ticket;
+use App\Services\ConektaService;
 use App\Services\TicketCodeService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
@@ -31,7 +32,7 @@ class CheckoutController extends Controller
             'buyer_name' => ['required', 'string', 'max:255'],
             'buyer_email' => ['required', 'string', 'max:255'],
             'buyer_phone' => ['nullable', 'string', 'max:30'],
-            'payment_method' => ['required', 'in:card,oxxo,transfer'],
+            'payment_method' => ['required', 'in:card,oxxo,transfer,bank_transfer'],
             'payment_status' => ['nullable', 'string', 'max:50'],
             'discount_code' => ['nullable', 'string', 'max:50'],
             'payment_reference' => ['nullable', 'string', 'max:120'],
@@ -71,7 +72,7 @@ class CheckoutController extends Controller
                 'total' => $total,
                 'metodo_pago' => match ($data['payment_method']) {
                     'card' => 'tarjeta',
-                    'transfer' => 'transferencia',
+                    'transfer', 'bank_transfer' => 'transferencia',
                     default => 'efectivo',
                 },
                 'canal_venta' => 'online',
@@ -416,5 +417,107 @@ class CheckoutController extends Controller
                 'message' => 'La compra se registró, pero no se pudo enviar el correo. Puedes descargar los PDFs desde esta confirmación.',
             ];
         }
+    }
+
+    public function createConektaCheckout(Request $request, ConektaService $conektaService): JsonResponse
+    {
+        $data = $request->validate([
+            'event_id' => ['required', 'exists:eventos,id'],
+            'event_zone_id' => ['required', 'exists:zonas,id'],
+            'quantity' => ['required', 'integer', 'min:1', 'max:20'],
+            'buyer_name' => ['required', 'string', 'max:255'],
+            'buyer_email' => ['required', 'string', 'max:255'],
+            'buyer_phone' => ['nullable', 'string', 'max:30'],
+            'payment_method' => ['required', 'in:card,oxxo,transfer,bank_transfer'],
+            'success_url' => ['nullable', 'url'],
+            'failure_url' => ['nullable', 'url'],
+        ]);
+
+        $apiKey = config('services.conekta.api_key');
+        if (! $apiKey) {
+            return response()->json([
+                'message' => 'Conekta no está configurado. Falta CONEKTA_API_KEY en el archivo .env.',
+            ], 422);
+        }
+
+        $context = $this->resolveCheckoutContext($data);
+
+        if (isset($context['error'])) {
+            return response()->json([
+                'message' => $context['error'],
+            ], 422);
+        }
+
+        $event = $context['event'];
+        $zone = $context['zone'];
+        $subtotal = $context['subtotal'];
+        $total = max(0, $subtotal);
+
+        // Validar URL base
+        $baseUrl = rtrim((string) config('app.url'), '/');
+        if ($baseUrl === '') {
+            return response()->json([
+                'message' => 'APP_URL no está configurada. Actualiza tu archivo .env con la URL completa de tu aplicación.',
+            ], 422);
+        }
+
+        $parsedBaseUrl = parse_url($baseUrl);
+        if (! $parsedBaseUrl || empty($parsedBaseUrl['scheme']) || empty($parsedBaseUrl['host'])) {
+            return response()->json([
+                'message' => 'APP_URL no es una URL válida. Debe ser algo como https://example.com.',
+            ], 422);
+        }
+
+        if (config('app.env') !== 'local' && ($parsedBaseUrl['scheme'] ?? '') !== 'https') {
+            return response()->json([
+                'message' => 'APP_URL debe usar HTTPS en entornos de producción.',
+            ], 422);
+        }
+
+        $successUrl = trim($data['success_url'] ?? "{$baseUrl}/compra?event={$event->id}");
+        $failureUrl = trim($data['failure_url'] ?? "{$baseUrl}/compra?event={$event->id}");
+
+        // Crear sesión de checkout en Conekta
+        $checkoutPayload = [
+            'title' => "{$event->name} - {$zone->nombre}",
+            'description' => "Compra de {$data['quantity']} boleto(s) para {$event->name}",
+            'quantity' => (int) $data['quantity'],
+            'unit_price' => round($total / max(1, (int) $data['quantity']), 2),
+            'payer_name' => $data['buyer_name'],
+            'payer_email' => $data['buyer_email'],
+            'payer_phone' => $data['buyer_phone'] ?? '',
+            'external_reference' => "EV{$event->id}-ZN{$zone->id}-Q{$data['quantity']}",
+            'success_url' => $successUrl,
+            'failure_url' => $failureUrl,
+        ];
+
+        Log::debug('Conekta checkout request', [
+            'payload' => $checkoutPayload,
+        ]);
+
+        $result = $conektaService->createCheckoutSession($checkoutPayload);
+
+        if (! $result['success']) {
+            Log::error('Error al crear sesión de checkout en Conekta', [
+                'message' => $result['message'],
+                'details' => $result['details'] ?? [],
+            ]);
+
+            return response()->json([
+                'message' => $result['message'],
+                'details' => $result['details'] ?? [],
+            ], 422);
+        }
+
+        return response()->json([
+            'checkout_url' => $result['checkout_url'],
+            'session_id' => $result['session_id'],
+            'expires_at' => $result['expires_at'] ?? null,
+            'back_urls' => [
+                'success' => $successUrl,
+                'failure' => $failureUrl,
+            ],
+            'base_url' => $baseUrl,
+        ]);
     }
 }

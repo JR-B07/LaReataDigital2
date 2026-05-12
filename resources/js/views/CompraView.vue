@@ -21,12 +21,13 @@ const pendingCheckoutKey = 'pending_checkout';
 
 const eventId = new URLSearchParams(window.location.search).get('event');
 
-const consumeMercadoPagoReturn = async () => {
+const consumePaymentReturn = async () => {
     const params = new URLSearchParams(window.location.search);
-    const status = params.get('status') || params.get('collection_status');
+    const status = params.get('payment_status') || params.get('status') || params.get('collection_status');
     const paymentId = params.get('payment_id') || params.get('collection_id');
+    const sessionId = params.get('session_id');
 
-    if (!status) return;
+    if (!status && !sessionId) return;
 
     const raw = localStorage.getItem(pendingCheckoutKey);
     if (!raw) return;
@@ -43,8 +44,8 @@ const consumeMercadoPagoReturn = async () => {
         return;
     }
 
-    const normalizedStatus = String(status).toLowerCase();
-    const isPaymentAccepted = normalizedStatus === 'approved' || normalizedStatus.startsWith('pending');
+    const normalizedStatus = String(status || 'approved').toLowerCase();
+    const isPaymentAccepted = normalizedStatus === 'approved' || normalizedStatus.startsWith('pending') || (!status && Boolean(sessionId));
 
     if (!isPaymentAccepted) {
         errorMsg.value = 'El pago no fue aprobado. Intenta nuevamente.';
@@ -67,7 +68,7 @@ const consumeMercadoPagoReturn = async () => {
             ...payload,
             payment_method: payload.payment_method,
             payment_status: normalizedStatus,
-            payment_reference: paymentId || null,
+            payment_reference: paymentId || sessionId || null,
         });
 
         orderResult.value = data;
@@ -75,7 +76,7 @@ const consumeMercadoPagoReturn = async () => {
         localStorage.removeItem(pendingCheckoutKey);
         window.history.replaceState({}, document.title, `/compra?event=${eventId}`);
     } catch (e) {
-        let msg = e.response?.data?.message || 'No se pudo finalizar la compra tras el pago con tarjeta.';
+        let msg = e.response?.data?.message || 'No se pudo finalizar la compra tras el pago.';
         if (e.response?.data?.details) {
             msg += '\nDetalles: ' + JSON.stringify(e.response.data.details);
         }
@@ -93,7 +94,7 @@ onMounted(async () => {
         zones.value = data.zones || [];
         qtys.value = zones.value.map(() => 0);
 
-        await consumeMercadoPagoReturn();
+        await consumePaymentReturn();
     } catch (e) {
         console.error(e);
     } finally {
@@ -223,22 +224,22 @@ const purchase = async () => {
             paidAt: new Date().toISOString(),
         };
 
-        if (['card', 'oxxo', 'transfer'].includes(paymentMethod.value)) {
-            const successUrl = `${window.location.origin}/compra?event=${event.value.id}`;
+        if (['card', 'oxxo', 'transfer', 'bank_transfer'].includes(paymentMethod.value)) {
+            const successUrl = `${window.location.origin}/compra?event=${event.value.id}&payment_provider=conekta&payment_status=approved`;
+            const failureUrl = `${window.location.origin}/compra?event=${event.value.id}&payment_provider=conekta&payment_status=failed`;
             localStorage.setItem(pendingCheckoutKey, JSON.stringify(checkoutPayload));
 
-            const { data } = await window.axios.post('/api/checkout/mercadopago/preference', {
+            const { data } = await window.axios.post('/api/checkout/conekta', {
                 ...checkoutPayload,
                 success_url: successUrl,
-                failure_url: successUrl,
-                pending_url: successUrl,
+                failure_url: failureUrl,
             });
 
-            if (!data?.redirect_url) {
-                throw new Error('Mercado Pago no devolvió URL de pago.');
+            if (!data?.checkout_url) {
+                throw new Error('Conekta no devolvió URL de pago.');
             }
 
-            window.location.href = data.redirect_url;
+            window.location.href = data.checkout_url;
             return;
         }
 
@@ -506,7 +507,7 @@ const purchase = async () => {
                     <div class="pay-icon">💳 Visa</div>
                     <div class="pay-icon">💳 MC</div>
                     <div class="pay-icon">🏪 OXXO</div>
-                    <div class="pay-icon">📱 MercadoPago</div>
+                    <div class="pay-icon">📱 Conekta</div>
                 </div>
             </div>
         </div>

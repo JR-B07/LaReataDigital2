@@ -31,6 +31,10 @@ class Order extends Model
         'mercadopago_preference_id',
         'mercadopago_payment_status',
         'mercadopago_response',
+        'conekta_session_id',
+        'conekta_charge_id',
+        'conekta_event_type',
+        'conekta_response',
     ];
 
     public function items()

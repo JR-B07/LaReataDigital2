@@ -30,16 +30,22 @@ Route::get('/tickets/{code}/pdf', [TicketController::class, 'downloadPdf']);
 
 Route::post('/checkout', [CheckoutController::class, 'store']);
 Route::post('/checkout/mercadopago/preference', [CheckoutController::class, 'createMercadoPagoPreference']);
+Route::post('/checkout/conekta', [CheckoutController::class, 'createConektaCheckout']);
 
 // Webhooks (sin autenticación)
 Route::prefix('webhook')->group(function () {
     Route::post('/mercadopago', [WebhookController::class, 'mercadopago']);
+    Route::post('/conekta', [WebhookController::class, 'conekta']);
 });
 
 // Endpoints de retorno de Mercado Pago (sin autenticación)
 Route::get('/checkout/success', [WebhookController::class, 'mercadopagoSuccess']);
 Route::get('/checkout/failure', [WebhookController::class, 'mercadopagoFailure']);
 Route::get('/checkout/pending', [WebhookController::class, 'mercadopagoPending']);
+
+// Endpoints de retorno de Conekta (sin autenticación)
+Route::get('/checkout/conekta/success', [WebhookController::class, 'conektaSuccess']);
+Route::get('/checkout/conekta/failure', [WebhookController::class, 'conektaFailure']);
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/orders/history', [CheckoutController::class, 'history']);

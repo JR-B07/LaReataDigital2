@@ -43,4 +43,9 @@ return [
         'sandbox_public_key' => env('MERCADOPAGO_SANDBOX_PUBLIC_KEY'),
     ],
 
+    'conekta' => [
+        'api_key' => env('CONEKTA_API_KEY', env('CONEKTA_API_KEY_PRIVATE')),
+        'webhook_url' => env('CONEKTA_WEBHOOK_URL', env('APP_URL') . '/api/webhook/conekta'),
+    ],
+
 ];
