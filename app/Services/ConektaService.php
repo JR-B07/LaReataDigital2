@@ -87,11 +87,14 @@ $payload = [
             ];
         }
 
-        $responseData = $response->json();
+$responseData = $response->json();
 
-
-$checkoutId = $responseData['channel']['checkout_request_id'] ?? null;
 $orderId = $responseData['id'] ?? null;
+$checkoutId = $responseData['channel']['checkout_request_id'] ?? null;
+$checkoutUrl = $checkoutId ? "https://pay.conekta.com/checkout/{$checkoutId}" : null;
+
+
+
 return [
     'success' => true,
     'order_id' => $orderId,
